@@ -171,6 +171,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             menu.addItem(install)
             menu.addItem(.separator())
         }
+        let about = NSMenuItem(title: "About ccop \(model.version)", action: #selector(aboutClicked), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+        menu.addItem(.separator())
         let open = NSMenuItem(title: "Open Window", action: #selector(openWindowClicked), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
@@ -198,6 +202,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func refreshClicked() { model.refresh() }
+
+    /// The standard About panel: icon, name, version and build.
+    @objc private func aboutClicked() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(nil)
+    }
     @objc private func planClicked() { model.openPlanSettings?() }
     @objc private func openWindowClicked() { openWindow(session: nil, tab: nil) }
     @objc private func quitClicked() { NSApp.terminate(nil) }

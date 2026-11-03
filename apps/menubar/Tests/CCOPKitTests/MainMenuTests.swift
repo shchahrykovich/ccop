@@ -21,6 +21,12 @@ final class MainMenuTests: XCTestCase {
         XCTAssertEqual(item(menu, key: "q")?.action, #selector(NSApplication.terminate(_:)))
     }
 
+    func testTheAppMenuStartsWithAboutThatShowsTheVersion() {
+        let about = MainMenu.make(appName: "ccop").items.first?.submenu?.items.first
+        XCTAssertEqual(about?.title, "About ccop")
+        XCTAssertEqual(about?.action, #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+    }
+
     func testCopyAndSelectAllWorkInSelectableText() {
         let menu = MainMenu.make(appName: "ccop")
         XCTAssertEqual(item(menu, key: "c")?.action, #selector(NSText.copy(_:)))

@@ -8,6 +8,9 @@ public enum MainMenu {
     public static func make(appName: String) -> NSMenu {
         let main = NSMenu()
         main.addItem(submenu(appName, [
+            // The standard panel shows the version from Info.plist.
+            item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
+            .separator(),
             item("Hide \(appName)", #selector(NSApplication.hide(_:)), "h"),
             .separator(),
             item("Quit \(appName)", #selector(NSApplication.terminate(_:)), "q"),
