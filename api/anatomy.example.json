@@ -1,0 +1,693 @@
+{
+  "session_id": "s1",
+  "started_at": "2026-11-02T10:00:00Z",
+  "ended_at": "2026-11-02T10:03:09Z",
+  "lanes": [
+    {
+      "id": "main",
+      "parent": null,
+      "tool_use_id": null,
+      "name": "Main session",
+      "agent_type": null,
+      "model": "claude-opus-5-5",
+      "started_at": "2026-11-02T10:00:00Z",
+      "ended_at": "2026-11-02T10:03:09Z",
+      "usage": {
+        "input_tokens": 5,
+        "cache_write_tokens": 24200,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 40003,
+        "output_tokens": 190,
+        "requests": 3
+      },
+      "tool_calls": 3,
+      "errors": 1,
+      "events": [
+        {
+          "kind": "prompt",
+          "start": "2026-11-02T10:00:00Z",
+          "end": "2026-11-02T10:00:00Z",
+          "text": "write the report",
+          "model": null,
+          "usage": null,
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 102412,
+          "paid_tokens": 20123
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:00:00Z",
+          "end": "2026-11-02T10:00:04Z",
+          "text": "Reading.",
+          "model": "claude-opus-5-5",
+          "usage": {
+            "input_tokens": 3,
+            "cache_write_tokens": 20000,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 0,
+            "output_tokens": 120,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 20003,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 102412,
+          "paid_tokens": null
+        },
+        {
+          "kind": "tool",
+          "start": "2026-11-02T10:00:04Z",
+          "end": "2026-11-02T10:00:05Z",
+          "text": "/p/notes.md",
+          "model": null,
+          "usage": null,
+          "tool": "Read",
+          "tool_use_id": "t1",
+          "is_error": false,
+          "result_bytes": 4000,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": 1578,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 6653,
+          "paid_tokens": 10872
+        },
+        {
+          "kind": "tool",
+          "start": "2026-11-02T10:00:04Z",
+          "end": "2026-11-02T10:00:06Z",
+          "text": "Research (general-purpose)",
+          "model": null,
+          "usage": null,
+          "tool": "Agent",
+          "tool_use_id": "t2",
+          "is_error": false,
+          "result_bytes": 8,
+          "agent_id": "a1",
+          "context_tokens": null,
+          "added_tokens": 3,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 6653,
+          "paid_tokens": 10872
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:00:06Z",
+          "end": "2026-11-02T10:01:00Z",
+          "text": "Done.",
+          "model": "claude-opus-5-5",
+          "usage": {
+            "input_tokens": 1,
+            "cache_write_tokens": 1700,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 20003,
+            "output_tokens": 40,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 21704,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 13305,
+          "paid_tokens": null
+        },
+        {
+          "kind": "compact",
+          "start": "2026-11-02T10:01:55Z",
+          "end": "2026-11-02T10:02:00Z",
+          "text": "Compacted (auto): 22K → 2K tokens",
+          "model": null,
+          "usage": {
+            "input_tokens": 21704,
+            "cache_write_tokens": 0,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 0,
+            "output_tokens": 0,
+            "requests": 0
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": 2498,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 8552,
+          "paid_tokens": 11266
+        },
+        {
+          "kind": "prompt",
+          "start": "2026-11-02T10:03:00Z",
+          "end": "2026-11-02T10:03:00Z",
+          "text": "push",
+          "model": null,
+          "usage": null,
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 8552,
+          "paid_tokens": 11266
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:03:00Z",
+          "end": "2026-11-02T10:03:05Z",
+          "text": null,
+          "model": "claude-opus-5-5",
+          "usage": {
+            "input_tokens": 1,
+            "cache_write_tokens": 2500,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 20000,
+            "output_tokens": 30,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 22501,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 17104,
+          "paid_tokens": null
+        },
+        {
+          "kind": "tool",
+          "start": "2026-11-02T10:03:05Z",
+          "end": "2026-11-02T10:03:09Z",
+          "text": "Push",
+          "model": null,
+          "usage": null,
+          "tool": "Bash",
+          "tool_use_id": "t3",
+          "is_error": true,
+          "result_bytes": 8,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": null,
+          "group": "git push",
+          "error": "rejected",
+          "refusal": null,
+          "command": "git push",
+          "cost_micros": null,
+          "paid_tokens": null
+        }
+      ],
+      "context": [
+        {
+          "at": "2026-11-02T10:00:04Z",
+          "event": 1,
+          "total": 20003,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 20003
+            }
+          ]
+        },
+        {
+          "at": "2026-11-02T10:01:00Z",
+          "event": 4,
+          "total": 21704,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 20003
+            },
+            {
+              "name": "Claude output",
+              "tokens": 120
+            },
+            {
+              "name": "Tool: Read",
+              "tokens": 1578
+            },
+            {
+              "name": "Tool: Agent",
+              "tokens": 3
+            }
+          ]
+        },
+        {
+          "at": "2026-11-02T10:03:05Z",
+          "event": 7,
+          "total": 22501,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 20003
+            },
+            {
+              "name": "Compacted summary",
+              "tokens": 2498
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "a1",
+      "parent": "main",
+      "tool_use_id": "t2",
+      "name": "Research",
+      "agent_type": "general-purpose",
+      "model": "claude-sonnet-5-5",
+      "started_at": "2026-11-02T10:00:06Z",
+      "ended_at": "2026-11-02T10:00:50Z",
+      "usage": {
+        "input_tokens": 3,
+        "cache_write_tokens": 9300,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 9002,
+        "output_tokens": 75,
+        "requests": 2
+      },
+      "tool_calls": 1,
+      "errors": 0,
+      "events": [
+        {
+          "kind": "prompt",
+          "start": "2026-11-02T10:00:06Z",
+          "end": "2026-11-02T10:00:06Z",
+          "text": "Research the topic",
+          "model": null,
+          "usage": null,
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 23004,
+          "paid_tokens": 9052
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:00:06Z",
+          "end": "2026-11-02T10:00:20Z",
+          "text": null,
+          "model": "claude-sonnet-5-5",
+          "usage": {
+            "input_tokens": 2,
+            "cache_write_tokens": 9000,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 0,
+            "output_tokens": 50,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 9002,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 23004,
+          "paid_tokens": null
+        },
+        {
+          "kind": "tool",
+          "start": "2026-11-02T10:00:20Z",
+          "end": "2026-11-02T10:00:30Z",
+          "text": "report format",
+          "model": null,
+          "usage": null,
+          "tool": "WebSearch",
+          "tool_use_id": "u1",
+          "is_error": false,
+          "result_bytes": 7,
+          "agent_id": null,
+          "context_tokens": null,
+          "added_tokens": 251,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 2802,
+          "paid_tokens": 9328
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:00:30Z",
+          "end": "2026-11-02T10:00:50Z",
+          "text": "Found it.",
+          "model": "claude-sonnet-5-5",
+          "usage": {
+            "input_tokens": 1,
+            "cache_write_tokens": 300,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 9002,
+            "output_tokens": 25,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 9303,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 2802,
+          "paid_tokens": null
+        }
+      ],
+      "context": [
+        {
+          "at": "2026-11-02T10:00:20Z",
+          "event": 1,
+          "total": 9002,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 9002
+            }
+          ]
+        },
+        {
+          "at": "2026-11-02T10:00:50Z",
+          "event": 3,
+          "total": 9303,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 9002
+            },
+            {
+              "name": "Claude output",
+              "tokens": 50
+            },
+            {
+              "name": "Tool: WebSearch",
+              "tokens": 251
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "start": "2026-11-02T10:00:00Z",
+      "end": "2026-11-02T10:02:00Z",
+      "prompt": "write the report",
+      "usage": {
+        "input_tokens": 4,
+        "cache_write_tokens": 21700,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 20003,
+        "output_tokens": 160,
+        "requests": 2
+      },
+      "subagent_usage": {
+        "input_tokens": 3,
+        "cache_write_tokens": 9300,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 9002,
+        "output_tokens": 75,
+        "requests": 2
+      },
+      "cost_micros": 115717,
+      "subagent_cost_micros": 25806,
+      "answers": 2,
+      "tool_calls": 2,
+      "subagents": [
+        "a1"
+      ]
+    },
+    {
+      "index": 2,
+      "start": "2026-11-02T10:03:00Z",
+      "end": "2026-11-02T10:03:09Z",
+      "prompt": "push",
+      "usage": {
+        "input_tokens": 1,
+        "cache_write_tokens": 2500,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 20000,
+        "output_tokens": 30,
+        "requests": 1
+      },
+      "subagent_usage": {
+        "input_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_write_1h_tokens": 0,
+        "cache_read_tokens": 0,
+        "output_tokens": 0,
+        "requests": 0
+      },
+      "cost_micros": 17104,
+      "subagent_cost_micros": 0,
+      "answers": 1,
+      "tool_calls": 1,
+      "subagents": []
+    }
+  ],
+  "tools": [
+    {
+      "tool": "Agent",
+      "calls": 1,
+      "errors": 0,
+      "total_ms": 2000,
+      "result_bytes": 8
+    },
+    {
+      "tool": "Bash",
+      "calls": 1,
+      "errors": 1,
+      "total_ms": 4000,
+      "result_bytes": 8
+    },
+    {
+      "tool": "Read",
+      "calls": 1,
+      "errors": 0,
+      "total_ms": 1000,
+      "result_bytes": 4000
+    },
+    {
+      "tool": "WebSearch",
+      "calls": 1,
+      "errors": 0,
+      "total_ms": 10000,
+      "result_bytes": 7
+    }
+  ],
+  "contributors": [
+    {
+      "lane": "main",
+      "event": 2,
+      "tokens": 1578
+    },
+    {
+      "lane": "a1",
+      "event": 2,
+      "tokens": 251
+    },
+    {
+      "lane": "main",
+      "event": 3,
+      "tokens": 3
+    }
+  ],
+  "spend": {
+    "cost_micros": 158627,
+    "tokens": 82778,
+    "causes": [
+      {
+        "kind": "prompt",
+        "name": "Your prompts",
+        "count": 2,
+        "errors": 0,
+        "model_calls": 1.5,
+        "cost_micros": 110964,
+        "tokens": 31389,
+        "error_cost_micros": 0,
+        "avg_context": 20836,
+        "added_tokens": 0
+      },
+      {
+        "kind": "task",
+        "name": "Tasks from the lead",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 1.0,
+        "cost_micros": 23004,
+        "tokens": 9052,
+        "error_cost_micros": 0,
+        "avg_context": 9002,
+        "added_tokens": 0
+      },
+      {
+        "kind": "compact",
+        "name": "Compaction",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 0.5,
+        "cost_micros": 8552,
+        "tokens": 11266,
+        "error_cost_micros": 0,
+        "avg_context": 22501,
+        "added_tokens": 0
+      },
+      {
+        "kind": "tool",
+        "name": "Agent",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 0.5,
+        "cost_micros": 6653,
+        "tokens": 10872,
+        "error_cost_micros": 0,
+        "avg_context": 21704,
+        "added_tokens": 3
+      },
+      {
+        "kind": "tool",
+        "name": "Read",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 0.5,
+        "cost_micros": 6653,
+        "tokens": 10872,
+        "error_cost_micros": 0,
+        "avg_context": 21704,
+        "added_tokens": 1578
+      },
+      {
+        "kind": "tool",
+        "name": "WebSearch",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 1.0,
+        "cost_micros": 2802,
+        "tokens": 9328,
+        "error_cost_micros": 0,
+        "avg_context": 9303,
+        "added_tokens": 251
+      },
+      {
+        "kind": "tool",
+        "name": "Bash",
+        "count": 1,
+        "errors": 1,
+        "model_calls": 0.0,
+        "cost_micros": 0,
+        "tokens": 0,
+        "error_cost_micros": 0,
+        "avg_context": 0,
+        "added_tokens": 0
+      }
+    ],
+    "lanes": [
+      {
+        "lane": "main",
+        "cost_micros": 132821,
+        "model_calls": 3,
+        "avg_context": 21402,
+        "max_context": 22501,
+        "start_context": 20003,
+        "sonnet_cost_micros": 70411
+      },
+      {
+        "lane": "a1",
+        "cost_micros": 25806,
+        "model_calls": 2,
+        "avg_context": 9152,
+        "max_context": 9303,
+        "start_context": 9002,
+        "sonnet_cost_micros": null
+      }
+    ],
+    "tips": [],
+    "commands": [
+      {
+        "group": "git push",
+        "calls": 1,
+        "errors": 1,
+        "cost_micros": 0,
+        "result_bytes": 8,
+        "example": "Push",
+        "items": [
+          {
+            "lane": "main",
+            "event": 8,
+            "cost_micros": 0
+          }
+        ]
+      }
+    ],
+    "errors": [
+      {
+        "tool": "Bash",
+        "message": "rejected",
+        "count": 1,
+        "cost_micros": 0,
+        "example": "Push",
+        "cause": null,
+        "refusal": null
+      }
+    ]
+  }
+}
