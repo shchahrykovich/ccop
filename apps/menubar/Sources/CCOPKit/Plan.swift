@@ -214,6 +214,28 @@ public enum Plan {
         return (week.map { "\(today)/\($0)" } ?? today, today, week, status.todayAllowanceMicros == 0 || fraction > 1)
     }
 
+    /// The smallest weekly percent ccop calibrates from: /usage rounds to a
+    /// whole percent, so 2% could be anything from 1.5% to 2.5%.
+    public static let minCalibrationPercent: Double = 5
+
+    /// Settings after a read of /usage: the weekly reset is the one /usage
+    /// shows, and the weekly limit is what ccop measured since that week
+    /// started divided by the percent /usage shows. A percent under
+    /// `minCalibrationPercent` keeps the old limit. `calibrated`: the limit
+    /// was set from this read.
+    public static func applying(_ limits: UsageLimits, to settings: PlanSettings,
+                                report: UsageReport?) -> (settings: PlanSettings, calibrated: Bool) {
+        guard let week = limits.week else { return (settings, false) }
+        var s = settings
+        if let reset = week.resetsAt { s.resetAnchor = reset }
+        guard let report, week.usedPercent >= minCalibrationPercent,
+              let status = status(settings: s, report: report, now: limits.readAt), status.usedMicros > 0,
+              let budget = calibrate(usedPercent: week.usedPercent, usedMicros: status.usedMicros) else { return (s, false) }
+        s.weeklyBudgetMicros = budget
+        s.calibratedAt = limits.readAt
+        return (s, true)
+    }
+
     /// The hue for a part of the allowance: green (1/3) at 0, yellow (1/6)
     /// at half, red (0) at the whole allowance and above.
     public static func hue(ofAllowance fraction: Double) -> Double {

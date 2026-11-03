@@ -16,7 +16,7 @@ It reads the transcript files that Claude Code already writes to `~/.claude/proj
 | Context tab | How the context grew over the session, split into parts (estimated) |
 | Chat tab | The messages of one session, with the tokens and cost of each |
 
-Costs are "API-equivalent": what the same calls would cost at Anthropic API prices. Anthropic does not publish plan limits, so you set the weekly limit once from the `/usage` percent that Claude Code shows.
+Costs are "API-equivalent": what the same calls would cost at Anthropic API prices. Anthropic does not publish plan limits as numbers. ccop runs `claude -p /usage` when it starts and then every hour, and takes the weekly percent and the reset time from it. From that percent and the cost it measured, it works out the weekly limit in dollars and the share for today. If `claude` is not found, you can type the numbers in Plan settings.
 
 ## Requirements
 

@@ -2,65 +2,88 @@ import AppKit
 import CCOPKit
 import SwiftUI
 
-/// This week against the weekly limit, and each day against the daily share.
-/// In the popover and the window's sidebar, above the session totals.
-struct PlanView: View {
+/// Today and this week against the limits, as two cards. In the popover and
+/// the window's sidebar; a click opens the plan settings.
+struct PlanCards: View {
     @Environment(AppModel.self) private var model
+    var compact = false
 
     var body: some View {
         if let s = model.weekStatus {
-            VStack(alignment: .leading, spacing: 6) {
-                header(s)
-                if let used = s.usedFraction {
-                    WeekBar(used: used, elapsed: s.elapsedFraction)
-                    Text("Week: \(Format.percent(used)) of the limit used, \(Format.percent(s.elapsedFraction)) of the week passed")
-                        .font(.caption).foregroundStyle(used > s.elapsedFraction ? .orange : .secondary)
-                    DayBars(status: s)
-                } else {
-                    Text("This week: \(Format.dollars(s.usedMicros)) API-equivalent. Calibrate the weekly limit to see the daily share.")
-                        .font(.caption).foregroundStyle(.secondary)
+            Button { model.openPlanSettings?() } label: {
+                HStack(spacing: compact ? 8 : 10) {
+                    todayCard(s)
+                    weekCard(s)
                 }
             }
+            .buttonStyle(.plain)
+            .help("Plan settings")
         } else {
-            HStack {
-                Text("Set your plan and weekly reset to see use against your limit.").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if model.limitsReading {
+                    ProgressView().controlSize(.small)
+                    Text("Reading your limits from Claude Code…").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "gauge.with.dots.needle.33percent").foregroundStyle(.secondary)
+                    Text(model.limitsError == nil ? "Read your limits from Claude Code to see today and the week."
+                        : "Could not read your limits from Claude Code.")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
                 Spacer()
                 Button("Plan…") { model.openPlanSettings?() }.controlSize(.small)
             }
         }
     }
 
-    private func header(_ s: WeekStatus) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(model.plan.tier.title).font(.subheadline.weight(.semibold))
-            Text("resets \(s.weekEnd.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())) (in \(Format.duration(s.weekEnd.timeIntervalSince(model.now))))")
-                .font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Button { model.openPlanSettings?() } label: { Image(systemName: "gearshape") }
-                .buttonStyle(.borderless)
-                .help("Plan settings")
+    private func todayCard(_ s: WeekStatus) -> some View {
+        let part = s.todayOfAllowance
+        let color = part.map(Theme.allowance) ?? .secondary
+        let caption: String = if let a = s.todayAllowanceMicros {
+            "\(Format.dollars(s.todayMicros)) of \(Format.dollars(a)) for today"
+        } else {
+            "\(Format.dollars(s.todayMicros)) today"
         }
+        return card(title: "Today", value: part.map(Self.percent) ?? Format.dollars(s.todayMicros), color: color,
+                    fill: part ?? 0, mark: nil, caption: caption)
     }
-}
 
-/// The used part of the week's limit, with a mark where an even pace would be.
-struct WeekBar: View {
-    let used: Double
-    let elapsed: Double
+    private func weekCard(_ s: WeekStatus) -> some View {
+        let used = s.usedFraction
+        let color: Color = switch used {
+        case let u? where u >= 0.9: Theme.bad
+        case let u? where u > s.elapsedFraction: Theme.warn
+        case .some: Theme.ok
+        case nil: .secondary
+        }
+        let reset = s.weekEnd.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        return card(title: "Week", value: used.map(Self.percent) ?? Format.dollars(s.usedMicros), color: color,
+                    fill: used ?? 0, mark: s.elapsedFraction,
+                    caption: "\(Format.percent(s.elapsedFraction)) of week passed · resets \(reset)")
+    }
 
-    var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.15))
-                Capsule().fill(used > elapsed ? Color.orange : Color.accentColor)
-                    .frame(width: g.size.width * min(1, used))
-                Rectangle().fill(Color.primary.opacity(0.7))
-                    .frame(width: 2, height: 12)
-                    .offset(x: g.size.width * min(1, elapsed) - 1)
-                    .help("An even pace would be here")
+    private func card(title: String, value: String, color: Color, fill: Double, mark: Double?, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 5 : 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title.uppercased()).font(.system(size: compact ? 10 : 11, weight: .semibold)).tracking(0.4)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(value).font(.system(size: compact ? 13 : 17, weight: .semibold)).monospacedDigit().foregroundStyle(color)
+            }
+            Meter(value: fill, color: color, mark: mark, height: compact ? 4 : 5)
+            if !compact {
+                Text(caption).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).minimumScaleFactor(0.85)
             }
         }
-        .frame(height: 8)
+        .padding(.horizontal, compact ? 9 : 11)
+        .padding(.vertical, compact ? 7 : 9)
+        .frame(maxWidth: .infinity)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.cardStroke))
+        .help(caption)
+    }
+
+    static func percent(_ f: Double) -> String {
+        f.isFinite ? "\(Int((f * 100).rounded()))%" : "limit"
     }
 }
 
@@ -74,15 +97,15 @@ struct DayBars: View {
         HStack(alignment: .bottom, spacing: 4) {
             ForEach(status.days) { day in
                 let share = status.ofAllowance(day) ?? 0
-                let todayColor = Color(hue: Plan.hue(ofAllowance: share), saturation: 0.85, brightness: 0.85)
+                let todayColor = Theme.allowance(share)
                 VStack(spacing: 2) {
-                    Text(day.isFuture ? "" : Self.percent(share))
+                    Text(day.isFuture ? "" : PlanCards.percent(share))
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(day.isToday ? todayColor : (share > 1 ? Color.red : .secondary))
+                        .foregroundStyle(day.isToday ? todayColor : (share > 1 ? Theme.bad : .secondary))
                     ZStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.10))
+                        RoundedRectangle(cornerRadius: 2).fill(Theme.track)
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(day.isToday ? todayColor : (share > 1 ? Color.red : Color.secondary.opacity(0.55)))
+                            .fill(day.isToday ? todayColor : (share > 1 ? Theme.bad : Color.secondary.opacity(0.55)))
                             .frame(height: 36 * min(2, share) / 2)
                         // The share or the allowance: half the column's height.
                         Rectangle().fill(Color.primary.opacity(0.35)).frame(height: 1).offset(y: -18)
@@ -98,77 +121,176 @@ struct DayBars: View {
         }
     }
 
-    private static func percent(_ share: Double) -> String {
-        share.isFinite ? "\(Int((share * 100).rounded()))%" : "limit"
-    }
-
     private func help(_ day: DayStatus, _ share: Double) -> String {
         let head = "\(day.start.formatted(date: .abbreviated, time: .omitted)): \(Format.dollars(day.costMicros)) API-equivalent"
         guard day.isToday, let allowance = status.todayAllowanceMicros else {
-            return head + ", \(Self.percent(share)) of the daily share (1/7 of the weekly limit)"
+            return head + ", \(PlanCards.percent(share)) of the daily share (1/7 of the weekly limit)"
         }
-        return head + ", \(Self.percent(share)) of today's allowance (\(Format.dollars(allowance)): the limit left, spread over the days left)"
+        return head + ", \(PlanCards.percent(share)) of today's allowance (\(Format.dollars(allowance)): the limit left, spread over the days left)"
     }
 }
 
-/// The plan window: tier, weekly reset, and the weekly limit.
+/// The plan window: the limits read from Claude Code, the week by day,
+/// Claude Code's own tips, and a way to type the numbers by hand.
 struct PlanSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var percent = ""
     @State private var message: String?
+    @State private var manual = false
 
     var body: some View {
-        @Bindable var model = model
-        Form {
-            Section {
-                Picker("Plan", selection: Binding(get: { model.plan.tier }, set: { model.plan.setTier($0) })) {
-                    ForEach(Tier.allCases) { Text($0.title).tag($0) }
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    limitsCard
+                    if let s = model.weekStatus, s.budgetMicros != nil {
+                        box {
+                            SectionLabel("This week by day")
+                            DayBars(status: s)
+                        }
+                    }
+                    if let period = model.limits?.periods.last, !period.tips.isEmpty {
+                        tipsCard(period)
+                    }
+                    manualEntry
+                    Text("Anthropic does not publish the limits as numbers, and Claude Code does not save them on disk. ccop measures use as API-equivalent cost, so a cheap cache read weighs less than an output token.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(20)
+            }
+            Divider()
+            HStack {
+                if model.plan.weeklyBudgetMicros != nil {
+                    Button("Forget the limit") { model.plan.weeklyBudgetMicros = nil; model.plan.calibratedAt = nil }
+                        .buttonStyle(.borderless).foregroundStyle(Theme.bad)
+                }
+                Spacer()
+                Button("Done") { NSApp.keyWindow?.close() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 540, height: 720)
+    }
+
+    private var limitsCard: some View {
+        box {
+            HStack(spacing: 10) {
+                IconTile(symbol: "terminal", color: .primary, size: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Limits from Claude Code").font(.headline)
+                    Text(readLine).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Spacer()
+                if model.limitsReading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { model.readLimits() } label: { Label("Read now", systemImage: "arrow.clockwise") }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            if let error = model.limitsError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(Theme.warn).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let limits = model.limits {
+                VStack(spacing: 10) {
+                    ForEach(limits.limits) { l in limitRow(l) }
+                }
+                .padding(12)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if let s = model.weekStatus {
+                HStack(spacing: 8) {
+                    StatCard(label: "Week cost (ccop)", value: Format.dollars(s.usedMicros))
+                    StatCard(label: "Weekly limit", value: s.budgetMicros.map { "≈ " + Format.dollars($0) } ?? "–")
+                    StatCard(label: "Daily share", value: s.dailyShareMicros.map(Format.dollars) ?? "–")
+                }
+                if let week = model.limits?.week, let b = model.plan.weeklyBudgetMicros, model.plan.calibratedAt != nil {
+                    Text("\(Format.dollars(UInt64(Double(b) * week.usedPercent / 100))) ÷ \(Int(week.usedPercent))% ≈ \(Format.dollars(b)). The week percent comes from Claude Code; the limit in dollars gives the daily share.")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Text("ccop reads the limits when it starts, then every hour.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var readLine: String {
+        if model.limitsReading { return "Running claude -p /usage…" }
+        guard let l = model.limits else { return "From claude -p /usage" }
+        let t = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
+        return "From claude -p /usage · read \(t(l.readAt)) · next \(t(l.readAt.addingTimeInterval(AppModel.limitsInterval)))"
+    }
+
+    private func limitRow(_ l: UsageLimits.Limit) -> some View {
+        let f = l.usedPercent / 100
+        let color: Color = f >= 0.9 ? Theme.bad : f >= 0.5 ? Theme.warn : Theme.ok
+        return HStack(spacing: 10) {
+            Text(l.title).font(.callout.weight(l.scope == nil || l.scope == "all models" ? .medium : .regular))
+                .frame(width: 140, alignment: .leading)
+            Meter(value: f, color: color, height: 6)
+            Text("\(Int(l.usedPercent))%").font(.callout.weight(.semibold)).monospacedDigit().foregroundStyle(color)
+                .frame(width: 40, alignment: .trailing)
+            Text(l.resetsAt.map { "resets " + $0.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) }
+                ?? l.resetText.map { "resets " + $0 } ?? "")
+                .font(.caption).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
+        }
+    }
+
+    private func tipsCard(_ period: UsageLimits.Period) -> some View {
+        box {
+            HStack(alignment: .firstTextBaseline) {
+                SectionLabel("Claude Code's tips")
+                Text("\(period.title.lowercased()) · \(period.summary)").font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(spacing: 0) {
+                ForEach(period.tips) { tip in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(tip.percent)%").font(.callout.weight(.semibold)).monospacedDigit().frame(width: 40, alignment: .trailing)
+                        Text(tip.text).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 6)
+                    .overlay(alignment: .top) { Divider() }
+                }
+            }
+            ForEach(period.extras, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+            Text("Approximate: sessions on this Mac only, and the shares overlap.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var manualEntry: some View {
+        DisclosureGroup("Type the numbers yourself", isExpanded: $manual) {
+            VStack(alignment: .leading, spacing: 8) {
                 DatePicker("Weekly limit resets", selection: Binding(
                     get: { model.plan.resetAnchor ?? Self.nextMonday() },
                     set: { model.plan.resetAnchor = $0 }
                 ), displayedComponents: [.date, .hourAndMinute])
-                Text("Type the reset time that /usage shows in Claude Code. It repeats every 7 days.")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Week used, as /usage shows it")
+                    TextField("", text: $percent, prompt: Text("37"))
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 60)
+                        .onSubmit(calibrate)
+                    Text("%")
+                    Button("Calibrate", action: calibrate).disabled(model.weekStatus == nil)
+                }
+                if let message { Text(message).font(.caption).foregroundStyle(Theme.warn) }
             }
-            Section("Weekly limit") {
-                if let s = model.weekStatus {
-                    LabeledContent("Used since the last reset", value: "\(Format.dollars(s.usedMicros)) API-equivalent")
-                }
-                LabeledContent("Weekly limit used now, as /usage shows it") {
-                    HStack {
-                        TextField("", text: $percent, prompt: Text("37"))
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
-                            .onSubmit(calibrate)
-                        Text("%")
-                        Button("Calibrate", action: calibrate).disabled(model.weekStatus == nil)
-                    }
-                }
-                if let b = model.plan.weeklyBudgetMicros {
-                    LabeledContent("Weekly limit", value: "≈ \(Format.dollars(b)) API-equivalent")
-                    LabeledContent("Daily share (1/7)", value: "≈ \(Format.dollars(b / 7))")
-                    if let a = model.weekStatus?.todayAllowanceMicros {
-                        LabeledContent("Today's allowance (limit left ÷ days left)", value: "≈ \(Format.dollars(a))")
-                    }
-                    if let at = model.plan.calibratedAt {
-                        Text("Calibrated \(at.formatted(date: .abbreviated, time: .shortened)) for \(model.plan.tier.title). A new plan scales it by the plans' ratio.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Button("Forget the limit") { model.plan.weeklyBudgetMicros = nil; model.plan.calibratedAt = nil }
-                }
-                if let message { Text(message).font(.caption).foregroundStyle(.orange) }
-                Text("Anthropic does not publish the limits as numbers, and Claude Code does not save the /usage percentages. ccop measures use as API-equivalent cost: the calls priced at API rates, so a cheap cache read weighs less than an output token. Calibrate again when the numbers drift.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            .padding(.top, 8)
         }
-        .formStyle(.grouped)
-        // A grouped Form scrolls and has no height of its own: without this
-        // the window shrinks to its title bar.
-        .frame(width: 520, height: 560)
-        .onAppear { if model.plan.resetAnchor == nil { model.plan.resetAnchor = Self.nextMonday() } }
+        .font(.callout)
+    }
+
+    private func box<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12, content: content)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.cardStroke))
     }
 
     private func calibrate() {
@@ -177,6 +299,7 @@ struct PlanSettingsView: View {
             message = "Type a percent above 0 and up to 100, for example 37."
             return
         }
+        if model.plan.resetAnchor == nil { model.plan.resetAnchor = Self.nextMonday() }
         message = model.calibrate(usedPercent: p) ? nil : "No use measured since the last reset yet: check the reset time, or try again after some work."
     }
 
@@ -198,9 +321,9 @@ final class PlanWindowController {
 
     func show() {
         let w = window ?? {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 720),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "ccop Plan"
+            w.title = "Plan settings"
             w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: PlanSettingsView().environment(model))
             w.center()

@@ -17,8 +17,8 @@ struct MainView: View {
     }
 }
 
-/// The period, search, totals and the sessions by day. Used in the popover
-/// and as the main window's sidebar.
+/// The limits, period, search, totals and the sessions by day. Used in the
+/// popover and as the main window's sidebar.
 struct SessionListView: View {
     @Environment(AppModel.self) private var model
     /// Highlighted row (the window's selection).
@@ -30,25 +30,26 @@ struct SessionListView: View {
         @Bindable var model = model
         let visible = model.visible
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
+            VStack(alignment: .leading, spacing: inWindow ? 10 : 11) {
+                HStack(spacing: 4) {
                     Text("Claude Code sessions").font(.headline)
                     Spacer()
                     if model.loading {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).frame(width: 28, height: 28)
                     } else {
-                        Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                        Button { model.refresh() } label: { Image(systemName: "arrow.clockwise").frame(width: 28, height: 28) }
                             .buttonStyle(.borderless)
                             .help("Refresh")
+                            .accessibilityLabel("Refresh")
                     }
                     if !inWindow {
-                        Button { model.openWindow?(nil, nil) } label: { Image(systemName: "macwindow") }
+                        Button { model.openWindow?(nil, nil) } label: { Image(systemName: "macwindow").frame(width: 28, height: 28) }
                             .buttonStyle(.borderless)
                             .help("Open in a window")
+                            .accessibilityLabel("Open in a window")
                     }
                 }
-                PlanView()
-                Divider()
+                PlanCards(compact: inWindow)
                 Picker("Period", selection: $model.period) {
                     ForEach(Period.allCases) { Text($0.title).tag($0) }
                 }
@@ -59,16 +60,17 @@ struct SessionListView: View {
                     TextField("Search title, prompt, branch or id", text: $model.query)
                         .textFieldStyle(.roundedBorder)
                 }
-                TotalsView(sessions: visible)
+                TotalsView(sessions: visible, compact: inWindow)
                 if let error = model.error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.warn)
                         .textSelection(.enabled)
                 }
                 UpdateBanner()
             }
-            .padding(12)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             Divider()
             if visible.isEmpty {
                 Spacer()
@@ -82,10 +84,12 @@ struct SessionListView: View {
                         Section {
                             if !collapsed {
                                 ForEach(section.sessions) { s in
-                                    SessionRow(session: s, now: model.now)
+                                    SessionRow(session: s, now: model.now, selected: s.id == selectedID,
+                                               openWindow: inWindow ? nil : { model.openWindow?(s.id, .overview) })
                                         .contentShape(Rectangle())
                                         .onTapGesture { select(s.id) }
                                         .listRowBackground(s.id == selectedID ? Color.accentColor.opacity(0.18) : Color.clear)
+                                        .listRowSeparator(.visible)
                                 }
                             }
                         } header: {
@@ -112,12 +116,17 @@ struct UpdateBanner: View {
                 Spacer()
                 Button("Install") { Task { await model.installUpdate(release) } }
                     .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
                     .help("Download \(release.version), quit, and open the new version")
                 Button { model.dismissUpdateMessage() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
                     .help("Hide until the next check")
+                    .accessibilityLabel("Hide until the next check")
             }
             .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         case let .downloading(release):
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
@@ -127,11 +136,12 @@ struct UpdateBanner: View {
         case let .failed(why):
             HStack(alignment: .top) {
                 Label("Could not update: \(why)", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warn)
                     .textSelection(.enabled)
                 Spacer()
                 Button { model.dismissUpdateMessage() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("Hide")
             }
             .font(.caption)
         case .idle, .checking, .upToDate:
@@ -153,13 +163,13 @@ struct DayHeader: View {
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
                     .font(.caption.weight(.semibold))
                     .frame(width: 10)
-                Text(section.title)
+                Text(section.title).fontWeight(.semibold)
                 if collapsed {
                     Text("\(section.sessions.count) session\(section.sessions.count == 1 ? "" : "s")")
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Text(Format.tokens(section.usage.total)).monospacedDigit()
+                Text(Format.tokens(section.usage.total)).monospacedDigit().foregroundStyle(.primary)
             }
             .contentShape(Rectangle())
         }
@@ -168,21 +178,26 @@ struct DayHeader: View {
     }
 }
 
-/// Sessions, tokens and the split of the tokens by kind.
+/// Tokens, cost, and the split of the tokens by kind.
 struct TotalsView: View {
     let sessions: [Session]
+    var compact = false
 
     var body: some View {
         let u = SessionList.total(sessions)
+        let cost = sessions.reduce(UInt64(0)) { $0 + $1.costMicros }
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(Format.tokens(u.total)).font(.title2.weight(.semibold)).monospacedDigit()
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Format.tokens(u.total)).font(.system(size: compact ? 17 : 22, weight: .semibold)).monospacedDigit()
                 Text("tokens in \(sessions.count) session\(sessions.count == 1 ? "" : "s")").foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Spacer()
-                Text("\(Format.percent(u.cacheHitRatio)) of input from cache")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(Format.dollars(cost)).font(.callout.weight(.semibold)).monospacedDigit()
+                if !compact {
+                    Text("API-equivalent").font(.caption).foregroundStyle(.secondary)
+                }
             }
-            UsageBar(usage: u)
+            UsageBar(usage: u, legend: !compact)
         }
     }
 }
@@ -190,16 +205,18 @@ struct TotalsView: View {
 /// A bar split by kind of token, with a legend.
 struct UsageBar: View {
     let usage: TokenUsage
+    var legend = true
+    var height: CGFloat = 6
 
     static let kinds: [(String, Color, KeyPath<TokenUsage, UInt64>)] = [
-        ("Input", .blue, \.inputTokens),
-        ("Cache write", .orange, \.cacheWriteTokens),
-        ("Cache read", .green, \.cacheReadTokens),
-        ("Output", .purple, \.outputTokens),
+        ("Input", Theme.input, \.inputTokens),
+        ("Cache write", Theme.cacheWrite, \.cacheWriteTokens),
+        ("Cache read", Theme.cacheRead, \.cacheReadTokens),
+        ("Output", Theme.output, \.outputTokens),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             GeometryReader { geo in
                 HStack(spacing: 1) {
                     ForEach(Self.kinds, id: \.0) { kind in
@@ -211,32 +228,45 @@ struct UsageBar: View {
                     }
                 }
             }
-            .frame(height: 6)
+            .frame(height: height)
             .clipShape(Capsule())
-            HStack(spacing: 10) {
-                ForEach(Self.kinds, id: \.0) { kind in
-                    HStack(spacing: 4) {
-                        Circle().fill(kind.1).frame(width: 7, height: 7)
-                        Text("\(kind.0) \(Format.tokens(usage[keyPath: kind.2]))").monospacedDigit()
+            .accessibilityHidden(true)
+            if legend {
+                HStack(spacing: 10) {
+                    ForEach(Self.kinds, id: \.0) { kind in
+                        HStack(spacing: 4) {
+                            Circle().fill(kind.1).frame(width: 7, height: 7)
+                            Text("\(kind.0) \(Format.tokens(usage[keyPath: kind.2]))").monospacedDigit()
+                        }
+                        .fixedSize()
                     }
+                    Spacer(minLength: 4)
+                    Text("cache \(Format.percent(usage.cacheHitRatio))").monospacedDigit().fixedSize()
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 }
 
+/// One session: a click shows it in the popover (or the window); the button
+/// opens it in the main window.
 struct SessionRow: View {
     let session: Session
     let now: Date
+    var selected = false
+    /// Nil in the window's sidebar.
+    var openWindow: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Circle()
-                .fill(session.active ? Color.green : Color.clear)
+                .fill(session.active ? Theme.ok : Color.clear)
                 .frame(width: 7, height: 7)
-                .padding(.top, 5)
+                .background(Circle().fill(session.active ? Theme.ok.opacity(0.2) : .clear).frame(width: 13, height: 13))
+                .frame(width: 13)
                 .help(session.active ? "Active: its transcript changed in the last 2 minutes" : "")
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).lineLimit(1)
@@ -252,10 +282,23 @@ struct SessionRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Format.tokens(session.usage.total)).monospacedDigit().fontWeight(.medium)
-                Text(session.usage.total > 0 ? "cache \(Format.percent(session.usage.cacheHitRatio))" : "")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text(subline).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            }
+            if let openWindow {
+                Button(action: openWindow) {
+                    Image(systemName: "macwindow").font(.system(size: 12)).frame(width: 26, height: 26)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Open in the main window")
+                .accessibilityLabel("Open \(session.title) in the main window")
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+    }
+
+    private var subline: String {
+        guard session.usage.total > 0 else { return "" }
+        return "\(Format.dollars(session.costMicros)) · cache \(Format.percent(session.usage.cacheHitRatio))"
     }
 }

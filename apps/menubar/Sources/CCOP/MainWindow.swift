@@ -76,9 +76,13 @@ struct WindowDetail: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                if session.active { Circle().fill(.green).frame(width: 8, height: 8).help("Active") }
+                if session.active {
+                    Circle().fill(Theme.ok).frame(width: 8, height: 8)
+                        .background(Circle().fill(Theme.ok.opacity(0.2)).frame(width: 14, height: 14))
+                        .help("Active")
+                }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.title).font(.title3.weight(.semibold)).lineLimit(1)
+                    Text(session.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                     Text([session.projectName, session.gitBranch].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }

@@ -65,6 +65,20 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertNotNil(main.events[2].paidTokens)
     }
 
+    func testTheCallsThatReadAnEventsTokens() throws {
+        let main = try Anatomy.decode(Data(contentsOf: Self.example)).lanes[0]
+        // prompt, answer, tool, tool, answer, compact, prompt, answer, tool;
+        // one context point per answer: events 1, 4, 7.
+        XCTAssertEqual(main.context.map(\.event), [1, 4, 7])
+        // The first prompt is read by the calls before the compaction.
+        XCTAssertEqual(main.readingCalls(after: 0), 0 ..< 2)
+        XCTAssertEqual(main.readingCalls(after: 3), 1 ..< 2)
+        // After the compaction only the call after it reads the new prompt.
+        XCTAssertEqual(main.readingCalls(after: 6), 2 ..< 3)
+        // No call after the last tool result.
+        XCTAssertNil(main.readingCalls(after: 8))
+    }
+
     func testChatAndCallDecode() throws {
         let chat = try LaneChat.decode(Data(#"{"lane":"main","texts":[{"event":0,"text":"Write the report.","thinking":false,"input":null,"output":null,"output_truncated":false},{"event":2,"text":null,"thinking":false,"input":{"command":"ls notes","description":"List notes","timeout":5000},"output":"a.md","output_truncated":true}]}"#.utf8))
         XCTAssertEqual(chat.byEvent[0]?.text, "Write the report.")

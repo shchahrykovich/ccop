@@ -92,6 +92,16 @@ public struct AnatomyLane: Codable, Equatable, Sendable, Identifiable {
         return events[(index + 1)...].firstIndex { $0.kind == .answer && $0.usage != nil }
     }
 
+    /// The model calls (positions in `context`) that read what event `index`
+    /// added: from the first call after it to the last one before the next
+    /// compaction. Nil when no call read it.
+    public func readingCalls(after index: Int) -> Range<Int>? {
+        guard let first = context.firstIndex(where: { $0.event > index }) else { return nil }
+        let compaction = events.indices.first { $0 > index && events[$0].kind == .compact } ?? Int.max
+        let end = context[first...].firstIndex { $0.event > compaction } ?? context.count
+        return first < end ? first ..< end : nil
+    }
+
     /// The cost of the lane's most expensive model call, for bars.
     public var maxAnswerCost: UInt64 {
         events.filter { $0.kind == .answer }.compactMap(\.costMicros).max() ?? 0

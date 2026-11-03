@@ -37,6 +37,14 @@ final class AppModel {
     }
     /// Tokens and cost by hour for the last 3 weeks.
     private(set) var usageReport: UsageReport?
+    /// The last read of `claude -p /usage`; read at launch, then every hour.
+    private(set) var limits: UsageLimits? = UsageLimits.load()
+    private(set) var limitsReading = false
+    private(set) var limitsError: String?
+    /// A new read waits for a fresh usage report before it calibrates.
+    @ObservationIgnored private var pendingCalibration = false
+    @ObservationIgnored private var lastLimitsTry = Date.distantPast
+    static let limitsInterval: TimeInterval = 3600
     /// Set by StatusItemController: opens the plan settings window.
     @ObservationIgnored var openPlanSettings: (() -> Void)?
     /// Anatomies loaded, by session id, and the ones loading now.
@@ -80,14 +88,47 @@ final class AppModel {
             }
         }
         refresh()
+        readLimits()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.now = Date()
                 let every: TimeInterval = self.popoverOpen || self.windowOpen ? 30 : 120
                 if Date().timeIntervalSince(self.lastLoad) >= every { self.refresh() }
+                if Date().timeIntervalSince(self.lastLimitsTry) >= Self.limitsInterval { self.readLimits() }
             }
         }
+    }
+
+    /// Runs `claude -p /usage` and keeps what it shows. The weekly reset and
+    /// limit follow from it once a fresh usage report is in.
+    func readLimits() {
+        guard !limitsReading else { return }
+        limitsReading = true
+        lastLimitsTry = Date()
+        Task.detached(priority: .utility) {
+            let result = Result { try LimitsReader.read() }
+            await MainActor.run {
+                self.limitsReading = false
+                switch result {
+                case let .success(l):
+                    self.limits = l
+                    l.save()
+                    self.limitsError = nil
+                    self.pendingCalibration = true
+                    if self.loading { return }
+                    self.refresh()
+                case let .failure(e):
+                    self.limitsError = e.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func applyLimitsIfReady() {
+        guard pendingCalibration, let limits, let usageReport, usageReport.generatedAt >= limits.readAt.addingTimeInterval(-60) else { return }
+        pendingCalibration = false
+        plan = Plan.applying(limits, to: plan, report: usageReport).settings
     }
 
     func refresh() {
@@ -114,9 +155,13 @@ final class AppModel {
                     self.error = e.localizedDescription
                 }
                 switch usage {
-                case let .success(report): self.usageReport = report
+                case let .success(report):
+                    self.usageReport = report
+                    self.applyLimitsIfReady()
                 case let .failure(e): self.error = self.error ?? e.localizedDescription
                 }
+                // A read of /usage that ended while this refresh ran needs a newer report.
+                if self.pendingCalibration, case .success = usage { self.refresh() }
             }
         }
     }
