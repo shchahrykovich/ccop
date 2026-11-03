@@ -62,6 +62,9 @@ public enum SessionList {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return sessions
             .filter { s in
+                // No model call and no longer running: a `claude -p /usage` run
+                // or a session closed before its first answer.
+                if s.usage.total == 0, !s.active { return false }
                 if let start, s.lastActivity < start { return false }
                 if let folder, normalized(s.projectDir) != folder { return false }
                 if words.isEmpty { return true }

@@ -119,6 +119,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        // The search field does not take the focus by itself.
+        DispatchQueue.main.async { [weak self] in self?.popover.contentViewController?.view.window?.makeFirstResponder(nil) }
         model.popoverOpen = true
         // `.transient` misses clicks in other apps once this app is not active.
         outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in

@@ -23,14 +23,19 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
+        // No text field gets the focus by itself.
+        DispatchQueue.main.async { window.makeFirstResponder(nil) }
         model.windowOpen = true
     }
 
     private func makeWindow() -> NSWindow {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
-                         styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         w.title = "ccop"
+        // The sidebar reaches the top, with the window buttons in it.
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
         w.minSize = NSSize(width: 900, height: 560)
         w.isReleasedWhenClosed = false
         let host = NSHostingController(rootView: WindowRootView().environment(model))
@@ -56,13 +61,17 @@ struct WindowRootView: View {
     var body: some View {
         NavigationSplitView {
             SessionListView(selectedID: model.windowSelectedID, inWindow: true) { model.windowSelectedID = $0 }
+                .toolbar(removing: .sidebarToggle)
                 .navigationSplitViewColumnWidth(min: 340, ideal: 420, max: 560)
         } detail: {
-            if let s = model.windowSelected {
-                WindowDetail(session: s)
-            } else {
-                Text("Choose a session").foregroundStyle(.secondary)
+            Group {
+                if let s = model.windowSelected {
+                    WindowDetail(session: s)
+                } else {
+                    Text("Choose a session").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .background(Theme.page)
         }
     }
 }
@@ -88,12 +97,9 @@ struct WindowDetail: View {
                 }
                 .help(session.title)
                 Spacer(minLength: 12)
-                Picker("View", selection: $model.windowTab) {
-                    ForEach(DetailTab.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 460)
+                Segmented(options: DetailTab.allCases.map { ($0, $0.title) }, selection: $model.windowTab, height: 24)
+                    .frame(width: 460)
+                    .accessibilityLabel("View")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

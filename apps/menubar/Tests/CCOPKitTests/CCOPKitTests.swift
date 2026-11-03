@@ -57,6 +57,16 @@ final class SessionListTests: XCTestCase {
 
     let now = parseDate("2026-11-02T15:00:00Z")!
 
+    func testASessionWithNoTokensShowsOnlyWhileActive() {
+        // A `claude -p /usage` run leaves a session that never called the model.
+        let list = [
+            session("empty", title: "/usage", at: "2026-11-02T14:00:00Z", output: 0),
+            session("starting", at: "2026-11-02T14:59:00Z", output: 0, active: true),
+            session("work", at: "2026-11-02T13:00:00Z"),
+        ]
+        XCTAssertEqual(SessionList.filter(list, query: "", period: .all, now: now).map(\.id), ["starting", "work"])
+    }
+
     var sessions: [Session] {
         [
             session("a", title: "Fix login bug", at: "2026-11-02T09:00:00Z", output: 100),

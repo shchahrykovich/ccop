@@ -42,6 +42,10 @@ struct SessionListView: View {
                             .help("Refresh")
                             .accessibilityLabel("Refresh")
                     }
+                    Button { model.openPlanSettings?() } label: { Image(systemName: "gearshape").frame(width: 28, height: 28) }
+                        .buttonStyle(.borderless)
+                        .help("Plan settings")
+                        .accessibilityLabel("Plan settings")
                     if !inWindow {
                         Button { model.openWindow?(nil, nil) } label: { Image(systemName: "macwindow").frame(width: 28, height: 28) }
                             .buttonStyle(.borderless)
@@ -50,11 +54,8 @@ struct SessionListView: View {
                     }
                 }
                 PlanCards(compact: inWindow)
-                Picker("Period", selection: $model.period) {
-                    ForEach(Period.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)
+                    .accessibilityLabel("Period")
                 HStack(spacing: 8) {
                     FolderPicker()
                     TextField("Search title, prompt, branch or id", text: $model.query)
@@ -88,8 +89,8 @@ struct SessionListView: View {
                                                openWindow: inWindow ? nil : { model.openWindow?(s.id, .overview) })
                                         .contentShape(Rectangle())
                                         .onTapGesture { select(s.id) }
-                                        .listRowBackground(s.id == selectedID ? Color.accentColor.opacity(0.18) : Color.clear)
-                                        .listRowSeparator(.visible)
+                                        .listRowBackground(rowBackground(selected: s.id == selectedID))
+                                        .listRowSeparator(inWindow ? .hidden : .visible)
                                 }
                             }
                         } header: {
@@ -99,6 +100,16 @@ struct SessionListView: View {
                 }
                 .listStyle(.plain)
             }
+        }
+    }
+
+    /// The window's chosen row: a solid accent plate, inset.
+    @ViewBuilder
+    private func rowBackground(selected: Bool) -> some View {
+        if selected {
+            RoundedRectangle(cornerRadius: 7).fill(Color.accentColor).padding(.horizontal, 6).padding(.vertical, 1)
+        } else {
+            Color.clear
         }
     }
 }
@@ -261,11 +272,12 @@ struct SessionRow: View {
     var openWindow: (() -> Void)?
 
     var body: some View {
+        let secondary: Color = selected ? .white.opacity(0.85) : .secondary
         HStack(alignment: .center, spacing: 8) {
             Circle()
-                .fill(session.active ? Theme.ok : Color.clear)
+                .fill(session.active ? (selected ? Color.white : Theme.ok) : Color.clear)
                 .frame(width: 7, height: 7)
-                .background(Circle().fill(session.active ? Theme.ok.opacity(0.2) : .clear).frame(width: 13, height: 13))
+                .background(Circle().fill(session.active && !selected ? Theme.ok.opacity(0.2) : .clear).frame(width: 13, height: 13))
                 .frame(width: 13)
                 .help(session.active ? "Active: its transcript changed in the last 2 minutes" : "")
             VStack(alignment: .leading, spacing: 2) {
@@ -276,25 +288,20 @@ struct SessionRow: View {
                     Text("· \(Format.ago(session.lastActivity, now: now))")
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondary)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Format.tokens(session.usage.total)).monospacedDigit().fontWeight(.medium)
-                Text(subline).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                Text(subline).font(.caption).foregroundStyle(secondary).monospacedDigit().lineLimit(1)
             }
             if let openWindow {
-                Button(action: openWindow) {
-                    Image(systemName: "macwindow").font(.system(size: 12)).frame(width: 26, height: 26)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Open in the main window")
-                .accessibilityLabel("Open \(session.title) in the main window")
+                SmallIconButton(symbol: "macwindow", help: "Open in the main window", action: openWindow)
             }
         }
-        .padding(.vertical, 3)
+        .foregroundStyle(selected ? Color.white : Color.primary)
+        .padding(.vertical, 2)
     }
 
     private var subline: String {

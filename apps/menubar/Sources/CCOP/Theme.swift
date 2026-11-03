@@ -35,7 +35,11 @@ enum Theme {
     static let prompt = ok
 
     /// A soft card background on the window or popover.
-    static let card = Color(nsColor: .controlBackgroundColor)
+    static let card = dynamic(0xF7F7F8, 0x2C2C2E)
+    /// The chosen segment of a segmented control.
+    static let segmentOn = dynamic(0xFFFFFF, 0x636366)
+    /// The window's main area, right of the sidebar.
+    static let page = Color(nsColor: .textBackgroundColor)
     static let cardStroke = Color.primary.opacity(0.07)
     static let track = Color.primary.opacity(0.08)
 
@@ -163,6 +167,62 @@ struct CopyableValue: View {
         .background(hovering ? Color.primary.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 5))
         .padding(.horizontal, -4)
         .onHover { hovering = $0 }
+    }
+}
+
+/// A segmented control drawn by hand: the system one shows its chosen
+/// segment grey in a popover.
+struct Segmented<Value: Hashable>: View {
+    let options: [(value: Value, title: String)]
+    @Binding var selection: Value
+    var height: CGFloat = 22
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.value) { option in
+                let on = option.value == selection
+                Button { selection = option.value } label: {
+                    Text(option.title)
+                        .font(.system(size: 12, weight: on ? .medium : .regular))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 5).fill(Theme.segmentOn)
+                            .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
+                    }
+                }
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+/// A small square button with a thin border and an SF Symbol.
+struct SmallIconButton: View {
+    let symbol: String
+    let help: String
+    var size: CGFloat = 26
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.44))
+                .foregroundStyle(.secondary)
+                .frame(width: size, height: size)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
