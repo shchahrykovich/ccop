@@ -261,11 +261,11 @@ struct CopyableValue: View {
             .accessibilityLabel(help)
         }
         .frame(minHeight: rowHeight)
-        .gridColumnAlignment(.leading)
-        .padding(.leading, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hovering ? Theme.ink(0.04, 0.06) : .clear, in: RoundedRectangle(cornerRadius: 5))
-        .padding(.leading, -4)
+        // The hover plate reaches 4 pt left of the text without moving it.
+        .background(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 5).fill(hovering ? Theme.ink(0.04, 0.06) : .clear).padding(.leading, -4)
+        }
         .onHover { hovering = $0 }
     }
 }
@@ -375,5 +375,33 @@ struct ActiveDot: View {
     var body: some View {
         Circle().fill(color).frame(width: size, height: size)
             .background(Circle().fill(halo ? Theme.ok.opacity(0.18) : .clear).frame(width: size + 6, height: size + 6))
+    }
+}
+
+extension View {
+    /// A part of the window drawn over the title bar. A double click on its
+    /// empty space does what the title bar's would (zoom, minimize or
+    /// nothing, as in System Settings); a drag moves the window.
+    func titleBarArea() -> some View {
+        background(TitleBarClicks())
+    }
+}
+
+private struct TitleBarClicks: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { ClickView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class ClickView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            guard event.clickCount == 2 else { return window.performDrag(with: event) }
+            switch TitleBarAction.current {
+            case .zoom: window.performZoom(nil)
+            case .minimize: window.performMiniaturize(nil)
+            case .nothing: break
+            }
+        }
     }
 }

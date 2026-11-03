@@ -1,5 +1,7 @@
 #!/bin/bash
-# Build CCOP.app and install it on this Mac.
+# Build "CCOP Dev.app" (the local, ad-hoc signed build) and install it on
+# this Mac. A release (CCOP.app) in the same folder stays; an older local
+# build named CCOP.app (ad-hoc signed) is removed.
 #
 #   scripts/install.sh [--user] [--launch]
 #
@@ -18,12 +20,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# shellcheck source=release-lib.sh
+. "$ROOT/scripts/release-lib.sh"
+
 "$ROOT/scripts/build-app.sh"
 mkdir -p "$dest_dir"
-dest="$dest_dir/CCOP.app"
-osascript -e 'tell application id "dev.ccop.app" to quit' >/dev/null 2>&1 || true
+dest="$dest_dir/$CC_DEV_NAME.app"
+osascript -e "tell application id \"$CC_DEV_BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
+old="$dest_dir/CCOP.app"
+if [[ -d "$old" ]] && codesign -dv "$old" 2>&1 | grep '^Signature=adhoc' >/dev/null; then
+    osascript -e "tell application id \"$CC_BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
+    rm -rf "$old"
+    printf '==> Removed the old local build %s\n' "$old"
+fi
 rm -rf "$dest"
-ditto "$ROOT/build/CCOP.app" "$dest"
+ditto "$ROOT/build/$CC_DEV_NAME.app" "$dest"
 printf '==> Installed %s\n' "$dest"
 if [[ $launch == 1 ]]; then
     open "$dest"

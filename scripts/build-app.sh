@@ -4,7 +4,10 @@
 #   scripts/build-app.sh [--sign <identity>] [--developer-id] [--out <dir>]
 #
 # Default signing is ad-hoc: it runs on this Mac; other Macs show a
-# Gatekeeper warning, and the app does not update itself. --developer-id
+# Gatekeeper warning, and the app does not update itself. Such a build is
+# "build/CCOP Dev.app" (id dev.ccop.app.dev, a grey icon with DEV), so it is
+# never taken for a release. --developer-id or --sign build build/CCOP.app.
+# --developer-id
 # picks the "Developer ID Application" identity from the keychain and signs
 # with the hardened runtime, as notarization requires.
 set -euo pipefail
@@ -30,7 +33,12 @@ done
 # The version is in one place: [workspace.package] in Cargo.toml.
 version="$(cc_version "$ROOT/Cargo.toml")"
 [[ -n "$version" ]] || cc_die "cannot read the version from Cargo.toml"
-APP="$out/CCOP.app"
+if [[ "$identity" == "-" ]]; then
+    name="$CC_DEV_NAME"; bundle_id="$CC_DEV_BUNDLE_ID"; icon_kind="dev"
+else
+    name="CCOP"; bundle_id="$CC_BUNDLE_ID"; icon_kind="release"
+fi
+APP="$out/$name.app"
 
 cc_say "Building the Rust CLI $version"
 (cd "$ROOT" && cargo build --release --quiet -p ccop)
@@ -50,15 +58,15 @@ for program in MacOS/CCOP Helpers/ccop; do
     [[ -x "$APP/Contents/$program" ]] || cc_die "missing $program in the bundle"
 done
 cmp -s "$swift_bin" "$APP/Contents/MacOS/CCOP" || cc_die "Contents/MacOS/CCOP is not the Swift app"
-sed -e "s|@VERSION@|$version|g" -e "s|@BUNDLE_ID@|$CC_BUNDLE_ID|g" -e "s|@MIN_MACOS@|$CC_MIN_MACOS|g" \
+sed -e "s|@VERSION@|$version|g" -e "s|@BUNDLE_ID@|$bundle_id|g" -e "s|@MIN_MACOS@|$CC_MIN_MACOS|g" -e "s|@NAME@|$name|g" \
     "$ROOT/scripts/Info.plist.in" > "$APP/Contents/Info.plist"
 plutil -lint -s "$APP/Contents/Info.plist"
 
-icon_cache="$ROOT/build/AppIcon.icns"
+icon_cache="$ROOT/build/AppIcon-$icon_kind.icns"
 if [[ ! -f "$icon_cache" || "$ROOT/scripts/make-icon.swift" -nt "$icon_cache" ]]; then
     cc_say "Drawing the icon"
     tmp="$(mktemp -d)"
-    swift "$ROOT/scripts/make-icon.swift" "$tmp/icon.png"
+    swift "$ROOT/scripts/make-icon.swift" "$tmp/icon.png" "$icon_kind"
     mkdir "$tmp/AppIcon.iconset"
     for s in 16 32 128 256 512; do
         sips -z $s $s "$tmp/icon.png" --out "$tmp/AppIcon.iconset/icon_${s}x${s}.png" >/dev/null
@@ -77,7 +85,7 @@ else
     flags=(--force --options runtime --timestamp --sign "$identity")
 fi
 # Nested programs first, then the bundle.
-codesign "${flags[@]}" --identifier "$CC_BUNDLE_ID.cli" "$APP/Contents/Helpers/ccop"
+codesign "${flags[@]}" --identifier "$bundle_id.cli" "$APP/Contents/Helpers/ccop"
 codesign "${flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 cc_say "Built $APP ($version)"

@@ -13,8 +13,8 @@ final class AppModel {
     private(set) var loadedAt: Date?
     var query = ""
     var period: Period = .week
-    /// The project folder the list shows; nil for all folders.
-    var folder: String?
+    /// The project folder the list shows (alone or with its subfolders); nil for all folders.
+    var folder: FolderScope?
     var selectedID: String?
     var now = Date()
     var popoverOpen = false {
@@ -176,7 +176,7 @@ final class AppModel {
 
     /// The folder menu: folders with sessions in the period, and the chosen one.
     var folderChoices: [FolderChoice] {
-        SessionList.folders(sessions, period: period, keeping: folder, now: now)
+        SessionList.folders(sessions, period: period, keeping: folder?.path, now: now)
     }
 
     var selected: Session? {

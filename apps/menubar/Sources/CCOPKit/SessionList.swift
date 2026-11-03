@@ -51,14 +51,56 @@ public struct FolderChoice: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Which folder the list shows: one folder alone, or a folder with all its
+/// subfolders (for example its worktrees in `.claude/worktrees`).
+public enum FolderScope: Equatable, Hashable, Sendable {
+    case only(String)
+    case withSubfolders(String)
+
+    public var path: String {
+        switch self {
+        case let .only(p), let .withSubfolders(p): p
+        }
+    }
+
+    /// Whether a session in `folder` belongs to the scope. Both paths are
+    /// without a trailing slash.
+    func contains(_ folder: String) -> Bool {
+        switch self {
+        case let .only(p): folder == p
+        case let .withSubfolders(p): folder == p || folder.hasPrefix(p == "/" ? "/" : p + "/")
+        }
+    }
+}
+
+/// A folder of the menu with the folders inside it that have sessions too.
+public struct FolderNode: Identifiable, Equatable, Sendable {
+    public var id: String { folder.path }
+    public var folder: FolderChoice
+    /// Every folder below `folder`, at any depth, by path.
+    public var subfolders: [FolderChoice]
+
+    /// Sessions in the folder and all its subfolders.
+    public var total: Int { subfolders.reduce(folder.sessions) { $0 + $1.sessions } }
+
+    /// `.claude/worktrees/wool` for `/p/book/.claude/worktrees/wool` in `/p/book`.
+    public func relativePath(of sub: FolderChoice) -> String {
+        sub.path.hasPrefix(folder.path + "/") ? String(sub.path.dropFirst(folder.path.count + 1)) : sub.path
+    }
+}
+
 public enum SessionList {
-    /// Sessions active in `period`, in `folder` (nil: any folder), whose
+    /// Sessions active in `period`, in the `folder` scope (nil: any folder), whose
     /// title, prompts, project or id contain every word of `query` (any
     /// case), the newest first.
-    public static func filter(_ sessions: [Session], query: String, period: Period, folder: String? = nil, now: Date,
+    public static func filter(_ sessions: [Session], query: String, period: Period, folder: FolderScope? = nil, now: Date,
                               calendar: Calendar = .current) -> [Session] {
         let start = period.start(now: now, calendar: calendar)
-        let folder = folder.map(normalized)
+        let folder: FolderScope? = switch folder {
+        case let .only(p)?: .only(normalized(p))
+        case let .withSubfolders(p)?: .withSubfolders(normalized(p))
+        case nil: nil
+        }
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return sessions
             .filter { s in
@@ -66,7 +108,7 @@ public enum SessionList {
                 // or a session closed before its first answer.
                 if s.usage.total == 0, !s.active { return false }
                 if let start, s.lastActivity < start { return false }
-                if let folder, normalized(s.projectDir) != folder { return false }
+                if let folder, !folder.contains(normalized(s.projectDir)) { return false }
                 if words.isEmpty { return true }
                 let text = [s.title, s.firstPrompt ?? "", s.lastPrompt ?? "", s.projectDir, s.gitBranch ?? "", s.id]
                     .joined(separator: "\n").lowercased()
@@ -102,6 +144,35 @@ public enum SessionList {
         return choices.filter { c in
             let text = (c.label + "\n" + c.path).lowercased()
             return words.allSatisfy { text.contains($0) }
+        }
+    }
+
+    /// The folders as a tree: each folder that is not inside another folder
+    /// of the list, with all the folders inside it (at any depth, by path).
+    public static func folderTree(_ choices: [FolderChoice]) -> [FolderNode] {
+        let paths = Set(choices.map(\.path))
+        func isInsideAnother(_ path: String) -> Bool {
+            var p = (path as NSString).deletingLastPathComponent
+            while p != "/" && !p.isEmpty {
+                if paths.contains(p) { return true }
+                p = (p as NSString).deletingLastPathComponent
+            }
+            return false
+        }
+        return choices.filter { !isInsideAnother($0.path) }.map { top in
+            FolderNode(folder: top, subfolders: choices.filter { $0.path.hasPrefix(top.path + "/") }.sorted { $0.path < $1.path })
+        }
+    }
+
+    /// The folders that match `search` (every word in the label or path), or
+    /// that have a matching subfolder. A matching folder keeps all its
+    /// subfolders; else only the matching ones stay.
+    public static func matching(_ nodes: [FolderNode], search: String) -> [FolderNode] {
+        if search.split(whereSeparator: \.isWhitespace).isEmpty { return nodes }
+        return nodes.compactMap { node in
+            if !matching([node.folder], search: search).isEmpty { return node }
+            let subs = matching(node.subfolders, search: search)
+            return subs.isEmpty ? nil : FolderNode(folder: node.folder, subfolders: subs)
         }
     }
 

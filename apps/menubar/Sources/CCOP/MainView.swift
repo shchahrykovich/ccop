@@ -93,6 +93,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
+            .titleBarArea()
             VStack(alignment: .leading, spacing: 10) {
                 PlanCards(compact: true)
                 Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)

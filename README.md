@@ -94,7 +94,7 @@ The Claude Code transcript format is not a stable public API. A new Claude Code 
 cargo test --workspace
 cargo clippy --workspace --all-targets
 swift test --package-path apps/menubar
-scripts/build-app.sh            # builds build/CCOP.app
+scripts/build-app.sh            # builds "build/CCOP Dev.app" (a local build: own name and icon, no updates)
 ```
 
 `CLAUDE.md` has more detail on the architecture and the transcript format.

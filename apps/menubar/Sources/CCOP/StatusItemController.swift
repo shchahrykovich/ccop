@@ -171,7 +171,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             menu.addItem(install)
             menu.addItem(.separator())
         }
-        let about = NSMenuItem(title: "About ccop \(model.version)", action: #selector(aboutClicked), keyEquivalent: "")
+        let about = NSMenuItem(title: "About \(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "ccop") \(model.version)", action: #selector(aboutClicked), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
         menu.addItem(.separator())

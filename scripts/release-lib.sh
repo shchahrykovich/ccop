@@ -4,6 +4,10 @@
 # the environment or from .env.notarize at the repository root (never exported).
 
 CC_BUNDLE_ID="dev.ccop.app"
+# A local (ad-hoc signed) build has its own name, id and icon, so it is never
+# taken for a release: it does not update itself, and both can be installed.
+CC_DEV_NAME="CCOP Dev"
+CC_DEV_BUNDLE_ID="$CC_BUNDLE_ID.dev"
 CC_GH_REPO="${CC_GH_REPO:-shchahrykovich/ccop}"
 CC_MIN_MACOS="14.0"
 

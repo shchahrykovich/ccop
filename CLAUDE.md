@@ -12,18 +12,18 @@ cargo test -p ccop-core the_newest_line                  # one Rust test (name f
 cargo clippy --workspace --all-targets                   # expected: no warnings
 swift test --package-path apps/menubar                   # Swift tests
 swift test --package-path apps/menubar --filter SessionListTests
-scripts/build-app.sh                                     # build/CCOP.app, ad-hoc signed
-scripts/build-app.sh --developer-id                      # signed with Developer ID + hardened runtime
-scripts/install.sh --user --launch                       # build and install to ~/Applications
+scripts/build-app.sh                                     # "build/CCOP Dev.app", ad-hoc signed (local build)
+scripts/build-app.sh --developer-id                      # build/CCOP.app, signed with Developer ID + hardened runtime
+scripts/install.sh --user --launch                       # build and install "CCOP Dev.app" to ~/Applications
 scripts/publish.sh [--patch|--minor|--major|--set X.Y.Z] # notarized DMG as a GitHub release (needs .env.notarize)
-build/CCOP.app/Contents/MacOS/CCOP --show                # run with the popover open (for screenshots)
-build/CCOP.app/Contents/MacOS/CCOP --window <id-prefix> anatomy   # open the window at a session (id prefix) and tab
+"build/CCOP Dev.app/Contents/MacOS/CCOP" --show                # run with the popover open (for screenshots)
+"build/CCOP Dev.app/Contents/MacOS/CCOP" --window <id-prefix> anatomy   # open the window at a session (id prefix) and tab
 cargo run -p ccop -- sessions --since 1d --verbose       # the CLI; --verbose prints files, MB read, ms
 cargo run -p ccop -- anatomy <id-prefix>                 # turns, lanes, tools of one session (--json for the app)
 cargo run -p ccop -- usage --days 7                      # tokens and API-equivalent cost per day (--json: per hour)
 cargo run -p ccop -- chat <id-prefix> --lane main --json # full texts of one lane, by event index (the app's Chat tab)
 cargo run -p ccop -- call <id-prefix> <tool_use_id>      # one tool call in full: input and whole output
-build/CCOP.app/Contents/MacOS/CCOP --plan                # open the plan settings window at launch
+"build/CCOP Dev.app/Contents/MacOS/CCOP" --plan                # open the plan settings window at launch
 UPDATE_EXAMPLES=1 cargo test -p ccop-core --test api_example   # rewrite api/anatomy.example.json after a type change
 ```
 
@@ -57,7 +57,7 @@ Same scripts and updater as `../localcron` (renamed `lr_` → `cc_`).
 - Version: `[workspace.package] version` in `Cargo.toml` only. `scripts/release-lib.sh` holds the bundle id (`dev.ccop.app`), the repo (`shchahrykovich/ccop`) and the signing helpers.
 - `build-app.sh --developer-id` signs `Helpers/ccop`, then the bundle, with the hardened runtime. `release.sh` bumps the version and makes `dist/ccop-<version>.dmg`; `--notarize` runs `notarize.sh` (sign the DMG, `notarytool submit --wait`, staple). `publish.sh` adds `gh release create` and checks the uploaded size. `.env.notarize` holds the notary credentials; it is git-ignored.
 - `CCOPKit/Updater.swift` reads `releases/latest`, takes the first `.dmg` asset (https GitHub hosts only), and on Install: download, `spctl --assess` the DMG, then a detached bash script waits for the app to quit, mounts the DMG, checks `CCOP.app` with `codesign --verify` and the same Team ID, swaps the bundle and opens it. Log: `~/Library/Logs/ccop/update-*.log`.
-- A build with no Team ID (ad-hoc: `swift run`, `install.sh`) never updates itself (`Updater.disabledReason`), so a build from source is not replaced by the release.
+- A build with no Team ID (ad-hoc: `swift run`, `install.sh`) never updates itself (`Updater.disabledReason`), so a build from source is not replaced by the release. `build-app.sh` names an ad-hoc build "CCOP Dev" (bundle id `dev.ccop.app.dev`, a slate icon with a yellow DEV band, `make-icon.swift ... dev`), so it is never taken for a release and both can be installed; it has its own settings. `install.sh` removes an older ad-hoc `CCOP.app` in the same folder, never a signed one.
 - `AppModel` checks 30 s after launch, then every 6 h, while the `autoUpdate` default is on (right-click menu toggle). An automatic check only reports an available update; it never installs without a click.
 
 ### Changing the JSON

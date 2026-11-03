@@ -105,6 +105,7 @@ struct WindowDetail: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 8)
             .frame(minHeight: 44)
+            .titleBarArea()
             Rectangle().fill(Theme.line).frame(height: 1)
             switch model.windowTab {
             case .overview:

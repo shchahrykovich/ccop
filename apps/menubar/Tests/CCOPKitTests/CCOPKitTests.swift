@@ -91,13 +91,13 @@ final class SessionListTests: XCTestCase {
     }
 
     func testFolderFilterKeepsOnlyThatFolder() {
-        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: "/p/blog", now: now).map(\.id), ["b"])
-        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: "/p/shop", now: now).map(\.id), ["a", "c", "d"])
+        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: .only("/p/blog"), now: now).map(\.id), ["b"])
+        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: .only("/p/shop"), now: now).map(\.id), ["a", "c", "d"])
         // A trailing slash names the same folder.
-        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: "/p/blog/", now: now).map(\.id), ["b"])
+        XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: .only("/p/blog/"), now: now).map(\.id), ["b"])
         XCTAssertEqual(SessionList.filter(sessions, query: "", period: .all, folder: nil, now: now).count, 4)
         // Folder, period and search all apply.
-        XCTAssertEqual(SessionList.filter(sessions, query: "cart", period: .week, folder: "/p/shop", now: now, calendar: utc).map(\.id), ["c"])
+        XCTAssertEqual(SessionList.filter(sessions, query: "cart", period: .week, folder: .only("/p/shop"), now: now, calendar: utc).map(\.id), ["c"])
     }
 
     func testFolderChoicesOfThePeriod() {
