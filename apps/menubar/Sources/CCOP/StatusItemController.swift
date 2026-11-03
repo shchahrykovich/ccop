@@ -59,8 +59,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let symbol = active > 0 ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right"
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ccop")
         image?.isTemplate = true
-        button.image = image
-        button.imagePosition = .imageLeading
         let tokens = model.todayTokens
         let week = model.weekStatus
         // With a weekly limit: "33%/87%". Today as a percent of today's
@@ -68,22 +66,22 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // green to red; then the week as a percent of the weekly limit, in the
         // menu bar's own color. Without a limit: today's tokens.
         let planLabel = week.flatMap(Plan.menuLabel)
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .medium)
-        let base: [NSAttributedString.Key: Any] = [.font: font, .baselineOffset: 0.5]
-        let title = NSMutableAttributedString()
         if let planLabel {
-            var todayAttributes = base
-            if let part = week?.todayOfAllowance {
-                todayAttributes[.foregroundColor] = NSColor(hue: Plan.hue(ofAllowance: part), saturation: 0.85, brightness: 0.85, alpha: 1)
+            // The board's label: "33%/87%" on a grey plate, no icon.
+            let todayColor: NSColor? = week?.todayOfAllowance.map {
+                NSColor(hue: Plan.hue(ofAllowance: $0), saturation: 0.85, brightness: 0.85, alpha: 1)
             }
-            title.append(NSAttributedString(string: " " + planLabel.today, attributes: todayAttributes))
-            if let w = planLabel.week {
-                title.append(NSAttributedString(string: "/" + w, attributes: base))
-            }
-        } else if tokens > 0 {
-            title.append(NSAttributedString(string: " " + Format.tokens(tokens), attributes: base))
+            button.image = Self.pill(today: planLabel.today, todayColor: todayColor, week: planLabel.week.map { "/" + $0 })
+            button.attributedTitle = NSAttributedString()
+            button.imagePosition = .imageOnly
+        } else {
+            button.image = image
+            button.imagePosition = .imageLeading
+            let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .medium)
+            button.attributedTitle = tokens > 0
+                ? NSAttributedString(string: " " + Format.tokens(tokens), attributes: [.font: font, .baselineOffset: 0.5])
+                : NSAttributedString()
         }
-        button.attributedTitle = title
         var tip = "ccop: \(Format.tokens(tokens)) tokens in sessions active today"
         if let week, let part = week.todayOfAllowance, let allowance = week.todayAllowanceMicros,
            let budget = week.budgetMicros, budget > 0, let used = week.usedFraction {
@@ -100,6 +98,30 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if active > 0 { tip += "\n\(active) session\(active == 1 ? "" : "s") active now" }
         if let error = model.error { tip += "\n\(error)" }
         button.toolTip = tip
+    }
+
+    /// The label drawn as an image: 13 pt medium digits, padding 2 × 7, a
+    /// plate of 8% black (12% white on a dark menu bar), radius 5. The colors
+    /// are read when the image is drawn, so they follow the menu bar.
+    static func pill(today: String, todayColor: NSColor?, week: String?) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let text = NSMutableAttributedString(string: today, attributes: [.font: font])
+        if let week { text.append(NSAttributedString(string: week, attributes: [.font: font])) }
+        let textSize = text.size()
+        let size = NSSize(width: ceil(textSize.width) + 14, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            (dark ? NSColor(white: 1, alpha: 0.12) : NSColor(white: 0, alpha: 0.08)).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            let label = NSColor.labelColor
+            let drawn = NSMutableAttributedString(string: today, attributes: [.font: font, .foregroundColor: todayColor ?? label])
+            if let week { drawn.append(NSAttributedString(string: week, attributes: [.font: font, .foregroundColor: label])) }
+            drawn.draw(at: NSPoint(x: 7, y: (rect.height - textSize.height) / 2))
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = "ccop: today \(today), week \(week ?? "")"
+        return image
     }
 
     @objc private func clicked() {

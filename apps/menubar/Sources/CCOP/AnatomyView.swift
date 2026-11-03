@@ -1,3 +1,4 @@
+import AppKit
 import CCOPKit
 import SwiftUI
 
@@ -29,12 +30,29 @@ enum Palette {
     }
 }
 
-/// Lines and soft fills of the anatomy tab.
+/// Text colours, lines and fills of the anatomy tab, as in the design board
+/// (light value, then dark value).
 private enum Ink {
-    static let line = Color.primary.opacity(0.10)
-    static let line2 = Color.primary.opacity(0.06)
-    static let soft = Color.primary.opacity(0.03)
+    static let text = Theme.dynamic(0x1D1D1F, 0xF2F2F4)
+    static let text2 = Theme.dynamic(0x5F5F64, 0xB9B9BF)
+    static let text3 = Theme.dynamic(0x6E6E73, 0xA1A1A8)
+    static let line = shade(0.10, 0.12)
+    static let line2 = shade(0.06, 0.07)
+    static let track = shade(0.07, 0.12)
+    static let hatch = shade(0.05, 0.07)
+    /// The page and the timeline box: #FFFFFF in light mode.
+    static let bg = Theme.page
+    /// The axis row and a hovered turn: #F7F7F8 in light mode.
+    static let soft = Theme.card
     static let callout = Theme.dynamic(0x1D1D1F, 0x48484A)
+
+    /// Black at `light` alpha in light mode, white at `dark` alpha in dark mode.
+    private static func shade(_ light: CGFloat, _ dark: CGFloat) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 1, alpha: dark) : NSColor(white: 0, alpha: light)
+        })
+    }
 }
 
 /// `48 s`, `38 min`, `5 h 19 min`.
@@ -79,13 +97,11 @@ struct AnatomyView: View {
                 }
                 // The callout can reach below the timeline: keep it above what follows.
                 .zIndex(1)
-                if let ref = selected, let lane = a.lane(ref.lane), lane.events.indices.contains(ref.index) {
-                    EventCard(anatomy: a, lane: lane, event: lane.events[ref.index]) { selected = $0 }
-                }
                 ToolCards(anatomy: a)
-                if a.lanes.count > 1 { SubagentTable(anatomy: a, selected: $selected) }
                 TurnList(anatomy: a, selected: $selected)
             }
+            .font(.system(size: 13))
+            .foregroundStyle(Ink.text)
             .padding(.horizontal, 24)
             .padding(.top, 18)
             .padding(.bottom, 28)
@@ -174,8 +190,10 @@ struct TimelineChart: View {
     static let callHeight: CGFloat = 8
     static let toolTop: CGFloat = 26
     static let toolHeight: CGFloat = 14
-    /// The dashed line between the two tracks; above it is the model call track.
+    /// For hit tests: above this line is the model call track, below it the tools.
     static let splitY: CGFloat = 23
+    /// The dashed line through the model call track.
+    static let dashY: CGFloat = 17
     /// How far a press may move and still be a click.
     static let clickSlop: CGFloat = 3
 
@@ -201,38 +219,37 @@ struct TimelineChart: View {
     private var header: some View {
         HStack(spacing: 14) {
             Text("Timeline").font(.system(size: 13, weight: .semibold))
-            Text(summary).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
-            Spacer(minLength: 8)
+            Text(summary).font(.system(size: 12)).foregroundStyle(Ink.text3).monospacedDigit().lineLimit(1)
+                .help(scale.gaps.isEmpty ? "" : "Active \(shortDuration(scale.activeSeconds))")
+            Spacer(minLength: 0)
             if !window.isWhole {
-                Text("\(shownTime) shown, \(zoomText)").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(shownTime) shown, \(zoomText)").font(.system(size: 12)).foregroundStyle(Ink.text3)
                     .monospacedDigit().lineLimit(1)
             }
             HStack(spacing: 4) {
-                Button { window.zoom(by: 1 / 1.5) } label: { Text("−") }
+                Button { window.zoom(by: 1 / 1.5) } label: { Text("−").font(.system(size: 13)) }
                     .keyboardShortcut("-", modifiers: .command)
                     .help("Zoom out (⌘−)")
                     .accessibilityLabel("Zoom out")
-                    .disabled(window.isWhole)
-                Button { window.zoom(by: 1.5) } label: { Text("+") }
+                Button { window.zoom(by: 1.5) } label: { Text("+").font(.system(size: 13)) }
                     .keyboardShortcut("=", modifiers: .command)
                     .help("Zoom in (⌘+). Or pinch, or scroll with ⌥ over the timeline. Drag or scroll sideways to move.")
                     .accessibilityLabel("Zoom in")
                     .disabled(window.span <= TimeWindow.minSpan)
-                Button("Fit") { window = TimeWindow() }
+                Button { window = TimeWindow() } label: { Text("Fit").font(.system(size: 12)) }
                     .keyboardShortcut("0", modifiers: .command)
                     .help("Show the whole session (⌘0)")
-                    .disabled(window.isWhole)
                     .buttonStyle(ZoomButtonStyle(width: nil))
             }
             .buttonStyle(ZoomButtonStyle())
         }
+        .frame(minHeight: 24)
     }
 
     private var summary: String {
         let span = anatomy.startedAt.flatMap { s in anatomy.endedAt.map { $0.timeIntervalSince(s) } } ?? 0
         var parts = [shortDuration(span)]
         if !scale.gaps.isEmpty {
-            parts.append("active \(shortDuration(scale.activeSeconds))")
             parts.append(scale.gaps.count == 1 ? "1 idle gap shortened" : "\(scale.gaps.count) idle gaps shortened")
         }
         return parts.joined(separator: " · ")
@@ -268,7 +285,7 @@ struct TimelineChart: View {
             Rectangle().fill(Ink.line2).frame(height: 1)
             HStack(spacing: 0) {
                 Text("Top: model calls · bottom: tools")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(Ink.text3)
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .padding(.horizontal, 14)
                     .frame(width: Self.labelWidth, alignment: .leading)
@@ -278,9 +295,9 @@ struct TimelineChart: View {
             .frame(height: Self.axisHeight)
             .background(Ink.soft)
         }
-        .background(Theme.card)
+        .background(Ink.bg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ink.line))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Ink.line))
         // After the clip, so the callout can reach out of the box.
         .overlay(alignment: .topLeading) { calloutLayer(lanes) }
     }
@@ -292,16 +309,16 @@ struct TimelineChart: View {
             .compactMap { $0 }.joined(separator: " · ")
         let depth = anatomy.depth(of: lane)
         return HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 2).fill(isMain ? Color.primary : Theme.agent)
+            RoundedRectangle(cornerRadius: 2).fill(isMain ? Ink.text : Theme.agent)
                 .frame(width: 4, height: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(isMain ? "Main" : lane.name)
                     .font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
-                Text(caption).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                Text(caption).font(.system(size: 11)).foregroundStyle(Ink.text3).monospacedDigit().lineLimit(1)
             }
         }
         .padding(.leading, 14 + CGFloat(max(0, depth - 1)) * 10)
-        .padding(.trailing, 10)
+        .padding(.trailing, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .help(laneHelp(lane))
@@ -414,20 +431,22 @@ struct TimelineChart: View {
     private func drawTracks(_ ctx: GraphicsContext, size: CGSize, lanes: [AnatomyLane]) {
         let w = size.width
         let lh = Self.laneHeight
-        // Idle gaps: a light diagonal hatch across all lanes.
+        // Idle gaps: a diagonal hatch across all lanes, as CSS
+        // `repeating-linear-gradient(135deg, line 0 3px, transparent 3px 7px)`:
+        // 3 pt stripes every 7 pt, measured across the stripes.
         for g in gapRanges(w) where g.x1 >= 0 && g.x0 <= w {
             let rect = CGRect(x: g.x0, y: 0, width: g.x1 - g.x0, height: size.height)
             var c = ctx
             c.clip(to: Path(rect))
-            c.fill(Path(rect), with: .color(Color.primary.opacity(0.02)))
             var hatch = Path()
+            let step = 7 * CGFloat(2).squareRoot()
             var hx = g.x0 - size.height
-            while hx < g.x1 {
+            while hx < g.x1 + step {
                 hatch.move(to: CGPoint(x: hx, y: size.height))
                 hatch.addLine(to: CGPoint(x: hx + size.height, y: 0))
-                hx += 7
+                hx += step
             }
-            c.stroke(hatch, with: .color(Color.primary.opacity(0.07)), lineWidth: 2.5)
+            c.stroke(hatch, with: .color(Ink.hatch), lineWidth: 3)
         }
         var children: [String: [AnatomyLane]] = [:]
         for lane in lanes { if let p = lane.parent { children[p, default: []].append(lane) } }
@@ -437,10 +456,11 @@ struct TimelineChart: View {
             if row > 0 {
                 ctx.fill(Path(CGRect(x: 0, y: y, width: w, height: 1)), with: .color(Ink.line2))
             }
-            var split = Path()
-            split.move(to: CGPoint(x: 0, y: y + Self.splitY))
-            split.addLine(to: CGPoint(x: w, y: y + Self.splitY))
-            ctx.stroke(split, with: .color(Color.primary.opacity(0.09)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            // A dashed line through the model call track.
+            var dash = Path()
+            dash.move(to: CGPoint(x: 0, y: y + Self.dashY + 0.5))
+            dash.addLine(to: CGPoint(x: w, y: y + Self.dashY + 0.5))
+            ctx.stroke(dash, with: .color(Ink.line2), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
 
             // Where each subagent this lane started ran: a light box on the tools track.
             for child in children[lane.id] ?? [] {
@@ -448,9 +468,10 @@ struct TimelineChart: View {
                 let x0 = x(s, w)
                 let r = CGRect(x: x0, y: y + Self.toolTop, width: max(3, x(e, w) - x0), height: Self.toolHeight)
                 guard r.maxX >= 0, r.minX <= w else { continue }
-                let shape = Path(roundedRect: r, cornerRadius: 2)
-                ctx.fill(shape, with: .color(Theme.agent.opacity(0.10)))
-                ctx.stroke(shape, with: .color(Theme.agent.opacity(0.55)), lineWidth: 1)
+                ctx.fill(Path(roundedRect: r, cornerRadius: 2), with: .color(Theme.agent.opacity(0.10)))
+                // The border is inside the box, as CSS `box-sizing: border-box`.
+                ctx.stroke(Path(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 1.5),
+                           with: .color(Theme.agent.opacity(0.55)), lineWidth: 1)
             }
 
             // Model calls and tool calls.
@@ -484,18 +505,26 @@ struct TimelineChart: View {
                     ctx.fill(Path(CGRect(x: x0 - 1, y: y, width: 2, height: lh)), with: .color(Theme.bad))
                 } else {
                     let dot = CGRect(x: x0 - 3.5, y: y + 3, width: 7, height: 7)
-                    ctx.fill(Path(ellipseIn: dot.insetBy(dx: -2, dy: -2)), with: .color(Theme.card))
+                    ctx.fill(Path(ellipseIn: dot.insetBy(dx: -2, dy: -2)), with: .color(Ink.bg))
                     ctx.fill(Path(ellipseIn: dot), with: .color(Theme.prompt))
                 }
             }
 
-            // The selected event: a ring.
+            // The selected event: a call grows 2 pt up and down, then a 2 pt
+            // ring of the background and a 1.5 pt dark ring around it.
             if let ref = selected, ref.lane == lane.id, lane.events.indices.contains(ref.index),
                let r = blockRect(lane.events[ref.index], row: row, width: w) {
-                let shape = r.insetBy(dx: -2, dy: -2)
-                ctx.stroke(Path(roundedRect: shape, cornerRadius: 3), with: .color(Theme.card), lineWidth: 2)
-                ctx.stroke(Path(roundedRect: shape.insetBy(dx: -1.75, dy: -1.75), cornerRadius: 4),
-                           with: .color(Color.primary), lineWidth: 1.5)
+                let e = lane.events[ref.index]
+                let grows = e.kind == .tool || e.kind == .answer
+                let shape = grows ? r.insetBy(dx: 0, dy: -2) : r
+                let radius: CGFloat = grows ? 2 : shape.width / 2
+                if grows {
+                    ctx.fill(Path(roundedRect: shape, cornerRadius: radius), with: .color(Palette.event(e)))
+                }
+                ctx.stroke(Path(roundedRect: shape.insetBy(dx: -1, dy: -1), cornerRadius: radius + 1),
+                           with: .color(Ink.bg), lineWidth: 2)
+                ctx.stroke(Path(roundedRect: shape.insetBy(dx: -2.75, dy: -2.75), cornerRadius: radius + 2.75),
+                           with: .color(Ink.text), lineWidth: 1.5)
             }
         }
     }
@@ -519,7 +548,10 @@ struct TimelineChart: View {
     /// Times below the track area, and each idle gap labeled at its place.
     private func drawAxis(_ ctx: GraphicsContext, size: CGSize) {
         let w = size.width
-        let midY = size.height / 2
+        // Labels sit 7 pt from the top of the 28 pt row; the first and the
+        // last are 0.4 % of the width from the ends.
+        let top: CGFloat = 7
+        let edge = w * 0.004
         let gaps = gapRanges(w)
         var taken: [CGRect] = []
         let measure = CGSize(width: 400, height: size.height)
@@ -527,10 +559,10 @@ struct TimelineChart: View {
         for g in gaps {
             let cx = (g.x0 + g.x1) / 2
             guard cx >= -40, cx <= w + 40 else { continue }
-            let text = ctx.resolve(Text("idle \(shortDuration(g.duration))").font(.system(size: 11)).foregroundStyle(.secondary))
+            let text = ctx.resolve(Text("idle \(shortDuration(g.duration))").font(.system(size: 11)).foregroundStyle(Ink.text3))
             let s = text.measure(in: measure)
             let left = min(max(cx - s.width / 2, 4), w - s.width - 4)
-            let rect = CGRect(x: left, y: midY - s.height / 2, width: s.width, height: s.height)
+            let rect = CGRect(x: left, y: top, width: s.width, height: s.height)
             if taken.contains(where: { $0.insetBy(dx: -6, dy: 0).intersects(rect) }) { continue }
             taken.append(rect)
             ctx.draw(text, in: rect)
@@ -546,17 +578,14 @@ struct TimelineChart: View {
             if gaps.contains(where: { pos >= $0.lo - pad && pos <= $0.hi + pad }) { continue }
             guard let d = scale.date(at: pos) else { continue }
             let time = seconds ? d.formatted(.dateTime.hour().minute().second()) : d.formatted(date: .omitted, time: .shortened)
-            let text = ctx.resolve(Text(time).font(.system(size: 11)).foregroundStyle(.secondary))
+            let text = ctx.resolve(Text(time).font(.system(size: 11)).foregroundStyle(Ink.text3).monospacedDigit())
             let s = text.measure(in: measure)
             let px = CGFloat(v) * w
-            let left: CGFloat = i == 0 ? 6 : i == count ? w - s.width - 6 : px - s.width / 2
-            let rect = CGRect(x: left, y: midY - s.height / 2, width: s.width, height: s.height)
+            let left: CGFloat = i == 0 ? edge : i == count ? w - s.width - edge : px - s.width / 2
+            let rect = CGRect(x: left, y: top, width: s.width, height: s.height)
             if taken.contains(where: { $0.insetBy(dx: -8, dy: 0).intersects(rect) }) { continue }
             taken.append(rect)
             ctx.draw(text, in: rect)
-            if i > 0, i < count {
-                ctx.fill(Path(CGRect(x: px - 0.5, y: 0, width: 1, height: 4)), with: .color(Color.primary.opacity(0.18)))
-            }
         }
     }
 
@@ -607,7 +636,9 @@ struct TimelineChart: View {
                r.maxX >= 0, r.minX <= width {
                 let e = lanes[row].events[ref.index]
                 let cx = trackX + min(max(r.midX, 0), width)
-                let ty = r.maxY + 4
+                // As on the board: a tool call ends at 40 pt, the arrow's box
+                // starts at 50 pt, and the callout 5 pt lower, under the arrow.
+                let ty = r.maxY + 10
                 ZStack(alignment: .topLeading) {
                     RoundedRectangle(cornerRadius: 2).fill(Ink.callout)
                         .frame(width: 10, height: 10)
@@ -615,7 +646,7 @@ struct TimelineChart: View {
                         .offset(x: cx - 5, y: ty)
                     EventCallout(lane: lanes[row], event: e)
                         .alignmentGuide(.leading) { d in -min(max(cx - 27, 0), max(0, boxWidth - d.width)) }
-                        .alignmentGuide(.top) { _ in -(ty + 4) }
+                        .alignmentGuide(.top) { _ in -(ty + 5) }
                 }
             }
         }
@@ -638,12 +669,11 @@ private struct ZoomButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 12))
+                .foregroundStyle(Ink.text)
                 .padding(.horizontal, width == nil ? 10 : 0)
                 .frame(width: width, height: 24)
-                .background(configuration.isPressed ? Color.primary.opacity(0.08) : Theme.card,
-                            in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Ink.line))
+                .background(configuration.isPressed ? Ink.soft : Ink.bg, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Ink.line))
                 .opacity(isEnabled ? 1 : 0.4)
                 .contentShape(Rectangle())
         }
@@ -658,7 +688,10 @@ private struct EventCallout: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 10) {
+                // The dark mode colour, which reads better on the dark callout
+                // (Bash: #2DD4BF, as on the board).
                 RoundedRectangle(cornerRadius: 2).fill(Palette.event(event)).frame(width: 9, height: 9)
+                    .environment(\.colorScheme, .dark)
                 title
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -784,7 +817,7 @@ private struct AnatomyLegend: View {
             if anatomy.lanes.count > 1 {
                 item("Subagent running") {
                     RoundedRectangle(cornerRadius: 2).fill(Theme.agent.opacity(0.18))
-                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(Theme.agent.opacity(0.6)))
+                        .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Theme.agent.opacity(0.6)))
                         .frame(width: 12, height: 8)
                 }
             }
@@ -792,13 +825,13 @@ private struct AnatomyLegend: View {
             item("Compaction") { Rectangle().fill(Theme.bad).frame(width: 2, height: 10) }
             item("Failed call") { RoundedRectangle(cornerRadius: 1).fill(Theme.bad).frame(width: 12, height: 2) }
             item("Idle gap, shortened") {
-                RoundedRectangle(cornerRadius: 2).fill(Color.primary.opacity(0.08))
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(Ink.line))
+                RoundedRectangle(cornerRadius: 2).fill(Ink.track)
+                    .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Ink.line))
                     .frame(width: 12, height: 8)
             }
         }
         .font(.system(size: 11))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Ink.text2)
         .padding(.leading, 2)
     }
 
@@ -831,74 +864,6 @@ private struct AnatomyLegend: View {
     }
 }
 
-// MARK: - Selected event
-
-enum EventFacts {
-    /// Tokens and sizes of an event, in one line.
-    static func line(_ e: AnatomyEvent) -> String {
-        var parts: [String] = [e.start.formatted(date: .omitted, time: .standard)]
-        switch e.kind {
-        case .answer:
-            if let c = e.contextTokens { parts.append("context \(Format.tokens(c))") }
-            if let u = e.usage {
-                parts.append("output \(Format.tokens(u.outputTokens))")
-                if u.cacheWriteTokens > 0 { parts.append("cache write \(Format.tokens(u.cacheWriteTokens))") }
-            }
-            if let m = e.model { parts.append(m) }
-        case .tool:
-            if let b = e.resultBytes { parts.append("returned \(Format.bytes(b))") } else { parts.append("no result") }
-            if let t = e.addedTokens { parts.append("+\(Format.tokens(t)) context") }
-        case .prompt, .compact:
-            if let t = e.addedTokens { parts.append("+\(Format.tokens(t)) context") }
-        case .error:
-            break
-        }
-        return parts.joined(separator: " · ")
-    }
-}
-
-/// The selected event, with a link to the subagent it started.
-private struct EventCard: View {
-    let anatomy: Anatomy
-    let lane: AnatomyLane
-    let event: AnatomyEvent
-    let select: (EventRef?) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 2).fill(Palette.event(event)).frame(width: 10, height: 10)
-                Text(event.label).font(.system(size: 13, weight: .semibold))
-                Text("in \(lane.id == "main" ? "Main" : lane.name)").foregroundStyle(.secondary)
-                Spacer()
-                Button { select(nil) } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help("Clear the selection")
-            }
-            Text("\(event.start.formatted(date: .omitted, time: .standard)) → \(event.end.formatted(date: .omitted, time: .standard)), \(Format.duration(event.duration))")
-                .foregroundStyle(.secondary).monospacedDigit()
-            if let c = event.command {
-                Text(c).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
-            } else if let t = event.text {
-                Text(t).textSelection(.enabled)
-            }
-            if let err = event.error {
-                Text("Error: \(err)").foregroundStyle(Theme.bad).textSelection(.enabled)
-            }
-            Text(EventFacts.line(event)).foregroundStyle(.secondary).monospacedDigit()
-            if let agent = event.agentId, let sub = anatomy.lane(agent) {
-                Text("Started the subagent “\(sub.name)”: \(Format.duration(sub.duration)), \(Format.tokens(sub.usage.total)) tokens, \(sub.toolCalls) tool calls.")
-            }
-        }
-        .font(.system(size: 12))
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.cardStroke))
-    }
-}
-
 // MARK: - Tools
 
 private struct ToolCards: View {
@@ -911,15 +876,17 @@ private struct ToolCards: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Tools").font(.system(size: 13, weight: .semibold))
             if anatomy.tools.isEmpty {
-                Text("No tool calls.").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("No tool calls.").font(.system(size: 12)).foregroundStyle(Ink.text3)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
+                AutoFitGrid(minWidth: 170, spacing: 10) {
                     ForEach(anatomy.tools) { t in
                         card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded)
                     }
                 }
-                Text(footnote(biggest: maxAdded > 0 ? biggest?.tool : nil))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                if maxAdded > 0, let name = biggest?.tool {
+                    Text("Bar: tokens the tool's results added to the context, compared with \(name).")
+                        .font(.system(size: 11)).foregroundStyle(Ink.text3)
+                }
             }
         }
     }
@@ -935,22 +902,17 @@ private struct ToolCards: View {
         return out
     }
 
-    private func footnote(biggest: String?) -> String {
-        let bar = biggest.map { "Bar: tokens the tool's results added to the context, compared with \($0). " } ?? ""
-        return bar + "Time adds up the time from each call to its result; calls that ran in parallel add up too."
-    }
-
     private func card(_ t: ToolStat, added: UInt64, maxAdded: UInt64) -> some View {
         let th = Theme.tool(t.tool)
         let time = shortDuration(Double(t.totalMs) / 1000)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                IconTile(symbol: th.symbol, color: th.color, size: 28)
+                ToolTile(tool: t.tool)
                 Text(t.tool).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
                 Text("\(t.calls)").font(.system(size: 20, weight: .semibold)).monospacedDigit()
             }
-            Meter(value: maxAdded > 0 ? Double(added) / Double(maxAdded) : 0, color: th.color, height: 4)
+            Bar(value: maxAdded > 0 ? Double(added) / Double(maxAdded) : 0, color: th.color)
             HStack(spacing: 0) {
                 Text(added > 0 ? "\(time) · +\(Format.tokens(added)) · " : "\(time) · ")
                 if t.errors > 0 {
@@ -960,75 +922,94 @@ private struct ToolCards: View {
                 }
             }
             .font(.system(size: 11.5))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Ink.text2)
             .monospacedDigit()
             .lineLimit(1)
         }
         .padding(12)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.cardStroke))
-        .help("\(t.tool): \(t.calls) calls, \(t.errors) errors, \(Format.duration(Double(t.totalMs) / 1000)) in total, returned \(Format.bytes(t.resultBytes)), added \(Format.tokens(added)) tokens to the context")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Ink.line))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .help("\(t.tool): \(t.calls) calls, \(t.errors) errors, \(Format.duration(Double(t.totalMs) / 1000)) in total, returned \(Format.bytes(t.resultBytes)), added \(Format.tokens(added)) tokens to the context. Time adds up the time from each call to its result; calls that ran in parallel add up too.")
     }
 }
 
-// MARK: - Subagents
-
-private struct SubagentTable: View {
-    let anatomy: Anatomy
-    @Binding var selected: EventRef?
+/// The 28 pt icon of a tool card: a tinted square with 7 pt corners.
+private struct ToolTile: View {
+    let tool: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Subagents").font(.system(size: 13, weight: .semibold))
-            Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 6) {
-                GridRow {
-                    Text("Description").gridColumnAlignment(.leading)
-                    Text("Model").gridColumnAlignment(.leading)
-                    Text("Start")
-                    Text("Time")
-                    Text("Tokens")
-                    Text("Tools")
-                }
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-                Divider()
-                ForEach(anatomy.lanesInTreeOrder.filter { $0.id != "main" }) { l in
-                    GridRow {
-                        HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 2).fill(Theme.agent).frame(width: 3, height: 14)
-                            Text(l.name).lineLimit(1).truncationMode(.tail)
-                        }
-                        .padding(.leading, CGFloat(anatomy.depth(of: l) - 1) * 12)
-                        .help([l.name, l.agentType].compactMap { $0 }.joined(separator: "\n"))
-                        Text(shortModel(l.model) ?? "").foregroundStyle(.secondary)
-                        Text(l.startedAt?.formatted(date: .omitted, time: .shortened) ?? "")
-                        Text(shortDuration(l.duration))
-                        Text(Format.tokens(l.usage.total))
-                        if l.errors > 0 {
-                            HStack(spacing: 0) {
-                                Text("\(l.toolCalls) · ")
-                                Text(plural(Int(l.errors), "error")).foregroundStyle(Theme.bad)
-                            }
-                        } else {
-                            Text("\(l.toolCalls)")
-                        }
-                    }
-                    .monospacedDigit()
-                    .contentShape(Rectangle())
-                    .onTapGesture { select(l) }
-                }
+        let th = Theme.tool(tool)
+        // Read's yellow is too light for a glyph: the board uses #A16207 for it.
+        let glyph = th.symbol == "doc.text" ? Theme.dynamic(0xA16207, 0xEAB308) : th.color
+        Image(systemName: th.symbol)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(glyph)
+            .frame(width: 28, height: 28)
+            .background(th.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A 4 pt bar on a track, with 2 pt corners.
+private struct Bar: View {
+    let value: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2).fill(Ink.track)
+                RoundedRectangle(cornerRadius: 2).fill(color)
+                    .frame(width: max(0, g.size.width * min(1, value)))
             }
-            .font(.system(size: 12))
-            .padding(12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.cardStroke))
         }
+        .frame(height: 4)
+    }
+}
+
+/// A grid like CSS `repeat(auto-fit, minmax(minWidth, 1fr))`: as many
+/// columns as fit, but never more than there are items, so a few items
+/// share the whole width. Each row is as tall as its tallest item.
+private struct AutoFitGrid: Layout {
+    var minWidth: CGFloat
+    var spacing: CGFloat
+
+    private func columns(_ width: CGFloat, _ count: Int) -> Int {
+        let fit = max(1, Int((width + spacing) / (minWidth + spacing)))
+        return max(1, min(fit, count))
     }
 
-    /// Selects the call that started the subagent.
-    private func select(_ lane: AnatomyLane) {
-        guard let p = lane.parent, let parent = anatomy.lane(p),
-              let i = parent.events.firstIndex(where: { $0.agentId == lane.id }) else { return }
-        selected = EventRef(lane: p, index: i)
+    private func rows(_ subviews: Subviews, width: CGFloat) -> (cols: Int, cell: CGFloat, heights: [CGFloat]) {
+        let cols = columns(width, subviews.count)
+        let cell = (width - spacing * CGFloat(cols - 1)) / CGFloat(cols)
+        var heights: [CGFloat] = []
+        for start in stride(from: 0, to: subviews.count, by: cols) {
+            let row = subviews[start ..< min(start + cols, subviews.count)]
+            heights.append(row.map { $0.sizeThatFits(ProposedViewSize(width: cell, height: nil)).height }.max() ?? 0)
+        }
+        return (cols, cell, heights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout Void) -> CGSize {
+        let width = proposal.width ?? (minWidth * CGFloat(subviews.count) + spacing * CGFloat(max(0, subviews.count - 1)))
+        let r = rows(subviews, width: width)
+        let height = r.heights.reduce(0, +) + spacing * CGFloat(max(0, r.heights.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout Void) {
+        let r = rows(subviews, width: bounds.width)
+        var y = bounds.minY
+        for (row, height) in r.heights.enumerated() {
+            for col in 0 ..< r.cols {
+                let i = row * r.cols + col
+                guard i < subviews.count else { break }
+                let x = bounds.minX + CGFloat(col) * (r.cell + spacing)
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: r.cell, height: height))
+            }
+            y += height + spacing
+        }
     }
 }
 
@@ -1047,10 +1028,10 @@ private struct TurnList: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Turns").font(.system(size: 13, weight: .semibold))
                 Text("One turn: your prompt and all the work until the next one.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(Ink.text3)
             }
             .padding(.bottom, 6)
-            LazyVStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(anatomy.turns) { turn in
                     let isOpen = open.contains(turn.id)
                     TurnRow(turn: turn, mix: mixes[turn.id] ?? [], maxCost: maxCost, isOpen: isOpen) {
@@ -1101,33 +1082,28 @@ private struct TurnRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(turn.prompt.isEmpty ? "Before the first prompt" : turn.prompt)
                     .font(.system(size: 13))
-                    .foregroundStyle(turn.prompt.isEmpty ? .secondary : .primary)
+                    .foregroundStyle(turn.prompt.isEmpty ? Ink.text3 : Ink.text)
                     .lineLimit(1).truncationMode(.tail)
-                Text(caption).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                Text(caption).font(.system(size: 11.5)).foregroundStyle(Ink.text3).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 4) {
                 MixBar(mix: mix).frame(height: 6)
-                Text(mixText).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Text(mixText).font(.system(size: 11)).foregroundStyle(Ink.text3).lineLimit(1).truncationMode(.tail)
             }
             .frame(width: 150)
             .help(mix.map { "\($0.count) \($0.tool)" }.joined(separator: ", "))
             VStack(alignment: .trailing, spacing: 4) {
                 Text(Format.dollars(turn.totalCostMicros)).font(.system(size: 13, weight: .semibold))
-                Meter(value: maxCost > 0 ? Double(turn.totalCostMicros) / Double(maxCost) : 0, color: .primary, height: 4)
+                Bar(value: maxCost > 0 ? Double(turn.totalCostMicros) / Double(maxCost) : 0, color: Ink.text)
             }
             .frame(width: 110)
             .help(costHelp)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .rotationEffect(isOpen ? .degrees(90) : .zero)
-                .frame(width: 10)
         }
         .monospacedDigit()
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(hovering || isOpen ? Color.primary.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 9))
+        .background(hovering || isOpen ? Ink.soft : .clear, in: RoundedRectangle(cornerRadius: 9))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: toggle)
@@ -1137,7 +1113,7 @@ private struct TurnRow: View {
 
     private var caption: String {
         var parts = [turn.start.formatted(date: .omitted, time: .shortened), shortDuration(turn.duration),
-                     plural(Int(turn.answers), "model call")]
+                     plural(Int(turn.answers), "call")]
         if !turn.subagents.isEmpty { parts.append(plural(turn.subagents.count, "subagent")) }
         return parts.joined(separator: " · ")
     }
@@ -1175,8 +1151,9 @@ private struct MixBar: View {
                 }
             }
             .frame(width: g.size.width, alignment: .leading)
-            .background(Theme.track)
-            .clipShape(Capsule())
+            // The parts fill the width; the track shows only for a turn with no tools.
+            .background(parts.isEmpty ? Ink.track : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
         }
     }
 
@@ -1233,7 +1210,7 @@ private struct SubagentEvents: View {
                 Text("Subagent: \(lane.name)").fontWeight(.medium)
                 Text([shortDuration(lane.duration), "\(Format.tokens(lane.usage.total)) tokens",
                       "\(lane.toolCalls) tools", shortModel(lane.model)].compactMap { $0 }.joined(separator: " · "))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Ink.text3)
             }
             .font(.system(size: 12))
         }
@@ -1250,17 +1227,17 @@ private struct EventRow: View {
     var body: some View {
         let e = event
         HStack(spacing: 8) {
-            Text(e.start.formatted(date: .omitted, time: .standard)).monospacedDigit().foregroundStyle(.secondary)
+            Text(e.start.formatted(date: .omitted, time: .standard)).monospacedDigit().foregroundStyle(Ink.text3)
                 .frame(width: 70, alignment: .leading)
             RoundedRectangle(cornerRadius: 2).fill(Palette.event(e)).frame(width: 8, height: 8)
             Text(e.label).fontWeight(e.kind == .tool ? .medium : .regular).frame(width: 110, alignment: .leading).lineLimit(1)
             Text(e.command ?? e.text ?? "").lineLimit(1)
                 .font(e.command != nil ? .system(size: 11.5, design: .monospaced) : .system(size: 12))
-                .foregroundStyle(e.kind == .answer ? .secondary : .primary)
+                .foregroundStyle(e.kind == .answer ? Ink.text3 : Ink.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if e.isError { Text("error").foregroundStyle(Theme.bad) }
-            Text(Format.duration(e.duration)).monospacedDigit().foregroundStyle(.secondary).frame(width: 70, alignment: .trailing)
-            Text(tokens(e)).monospacedDigit().foregroundStyle(.secondary).frame(width: 150, alignment: .trailing)
+            Text(Format.duration(e.duration)).monospacedDigit().foregroundStyle(Ink.text3).frame(width: 70, alignment: .trailing)
+            Text(tokens(e)).monospacedDigit().foregroundStyle(Ink.text3).frame(width: 150, alignment: .trailing)
         }
         .font(.system(size: 12))
         .padding(.vertical, 3)

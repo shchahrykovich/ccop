@@ -59,24 +59,26 @@ struct WindowRootView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        NavigationSplitView {
-            SessionListView(selectedID: model.windowSelectedID, inWindow: true) { model.windowSelectedID = $0 }
-                .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 420, max: 560)
-        } detail: {
+        HStack(spacing: 0) {
+            SidebarView(selectedID: model.windowSelected?.id) { model.windowSelectedID = $0 }
             Group {
                 if let s = model.windowSelected {
                     WindowDetail(session: s)
                 } else {
-                    Text("Choose a session").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Text("Choose a session").foregroundStyle(Theme.text3).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .background(Theme.page)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.bg)
         }
+        .foregroundStyle(Theme.text)
+        .font(.ui(13))
+        // The sidebar reaches the top, under the window buttons.
+        .ignoresSafeArea()
     }
 }
 
-/// One session in the window: a header and the three tabs.
+/// One session in the window: a header with the tabs, then the tab.
 struct WindowDetail: View {
     @Environment(AppModel.self) private var model
     let session: Session
@@ -84,26 +86,26 @@ struct WindowDetail: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if session.active {
-                    Circle().fill(Theme.ok).frame(width: 8, height: 8)
-                        .background(Circle().fill(Theme.ok.opacity(0.2)).frame(width: 14, height: 14))
-                        .help("Active")
+                    ActiveDot(size: 8).help("Active")
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(session.title).font(.ui(15, .semibold)).lineLimit(1)
                     Text([session.projectName, session.gitBranch].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
                 }
                 .help(session.title)
                 Spacer(minLength: 12)
-                Segmented(options: DetailTab.allCases.map { ($0, $0.title) }, selection: $model.windowTab, height: 24)
-                    .frame(width: 460)
-                    .accessibilityLabel("View")
+                Segmented(options: DetailTab.allCases.map { ($0, $0.title) }, selection: $model.windowTab,
+                          height: 24, equalWidths: false, radius: 8)
+                    .fixedSize()
+                    .accessibilityLabel("Session views")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44)
+            Rectangle().fill(Theme.line).frame(height: 1)
             switch model.windowTab {
             case .overview:
                 SessionDetailView(session: session, inWindow: true)
@@ -123,25 +125,16 @@ struct AnatomyLoader: View {
     var body: some View {
         Group {
             switch model.anatomies[session.id] {
-            case let .loaded(a, at):
-                VStack(spacing: 0) {
-                    switch tab {
-                    case .spend: SpendView(session: session, anatomy: a)
-                    case .chat: ChatView(session: session, anatomy: a)
-                    case .anatomy: AnatomyView(session: session, anatomy: a)
-                    default: ContextView(anatomy: a)
-                    }
-                    HStack {
-                        Text("Read \(Format.ago(at, now: model.now))").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Reload") { model.loadAnatomy(session, reload: true) }.controlSize(.small)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+            case let .loaded(a, _):
+                switch tab {
+                case .spend: SpendView(session: session, anatomy: a)
+                case .chat: ChatView(session: session, anatomy: a)
+                case .anatomy: AnatomyView(session: session, anatomy: a)
+                default: ContextView(anatomy: a)
                 }
             case let .failed(why):
                 VStack(spacing: 8) {
-                    Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).textSelection(.enabled)
+                    Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).textSelection(.enabled)
                     Button("Try again") { model.loadAnatomy(session, reload: true) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

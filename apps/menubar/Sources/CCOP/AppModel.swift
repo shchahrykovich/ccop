@@ -70,6 +70,10 @@ final class AppModel {
     var autoUpdate = UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoUpdate, forKey: "autoUpdate") }
     }
+    /// Read `claude -p /usage` at launch, then every hour (on by default).
+    var autoReadLimits = UserDefaults.standard.object(forKey: "autoReadLimits") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoReadLimits, forKey: "autoReadLimits") }
+    }
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     /// The Team ID this app is signed with; nil for a local (ad-hoc) build.
     @ObservationIgnored private let teamID = Updater.teamIdentifier(of: Bundle.main.bundleURL)
@@ -88,14 +92,14 @@ final class AppModel {
             }
         }
         refresh()
-        readLimits()
+        if autoReadLimits { readLimits() }
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.now = Date()
                 let every: TimeInterval = self.popoverOpen || self.windowOpen ? 30 : 120
                 if Date().timeIntervalSince(self.lastLoad) >= every { self.refresh() }
-                if Date().timeIntervalSince(self.lastLimitsTry) >= Self.limitsInterval { self.readLimits() }
+                if self.autoReadLimits, Date().timeIntervalSince(self.lastLimitsTry) >= Self.limitsInterval { self.readLimits() }
             }
         }
     }
@@ -182,7 +186,8 @@ final class AppModel {
     var activeCount: Int { sessions.filter(\.active).count }
 
     var windowSelected: Session? {
-        windowSelectedID.flatMap { id in sessions.first { $0.id == id } }
+        // `--window <id-prefix>` gives a prefix.
+        windowSelectedID.flatMap { id in sessions.first { $0.id == id } ?? sessions.first { $0.id.hasPrefix(id) } }
     }
 
     func toggleDay(_ title: String) {

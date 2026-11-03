@@ -5,22 +5,39 @@ import SwiftUI
 /// field and a scrolling list of the folders of the period.
 struct FolderPicker: View {
     @Environment(AppModel.self) private var model
+    /// Inside the sidebar's search field: small grey text, no border.
+    var inField = false
     @State private var open = false
 
     var body: some View {
         let choices = model.folderChoices
         Button { open.toggle() } label: {
-            HStack(spacing: 4) {
-                Text(title(choices)).lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 2)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            if inField {
+                HStack(spacing: 4) {
+                    Text(title(choices)).lineLimit(1).truncationMode(.middle)
+                    Image(systemName: "chevron.down").font(.system(size: 7.5, weight: .bold))
+                }
+                .font(.ui(11))
+                .foregroundStyle(Theme.text2)
+                .frame(maxWidth: 140, alignment: .trailing)
+                .contentShape(Rectangle())
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").font(.system(size: 12))
+                    Text(title(choices)).lineLimit(1).truncationMode(.middle)
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                }
+                .font(.ui(12))
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.line))
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.bordered)
-        .frame(width: 170)
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: !inField, vertical: false)
         .help(model.folder ?? "Show the sessions of one project folder")
         .popover(isPresented: $open, arrowEdge: .bottom) {
             FolderList(choices: choices, selected: model.folder) { path in
@@ -30,9 +47,12 @@ struct FolderPicker: View {
         }
     }
 
+    /// The chosen folder's name, at most 26 characters (cut in the middle).
     private func title(_ choices: [FolderChoice]) -> String {
         guard let folder = model.folder else { return "All folders" }
-        return choices.first { $0.path == folder }?.label ?? folder
+        let name = choices.first { $0.path == folder }?.label ?? folder
+        guard name.count > 26 else { return name }
+        return name.prefix(12) + "…" + name.suffix(13)
     }
 }
 

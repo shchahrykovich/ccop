@@ -1,16 +1,26 @@
 import CCOPKit
 import SwiftUI
 
-/// One session: in the popover a compact view with a bar of actions; in the
-/// window the Overview tab.
+/// One session: in the popover a compact view with a bar of actions (board
+/// "Popover · one session"); in the window the Overview tab (board
+/// "Window · Overview").
 struct SessionDetailView: View {
     @Environment(AppModel.self) private var model
     let session: Session
     /// In the main window: no back button, the window has tabs.
     let inWindow: Bool
+    @State private var wide = true
 
     var body: some View {
-        if inWindow { overview } else { popover }
+        Group {
+            if inWindow { overview } else { popover }
+        }
+        .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
+    }
+
+    private var anatomy: Anatomy? {
+        if case let .loaded(a, _) = model.anatomies[session.id] { return a }
+        return nil
     }
 
     // MARK: Popover
@@ -19,22 +29,32 @@ struct SessionDetailView: View {
         let s = session
         return VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Button { model.selectedID = nil } label: { Label("Sessions", systemImage: "chevron.left").fontWeight(.medium) }
-                    .buttonStyle(.borderless)
+                Button { model.selectedID = nil } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                        Text("Sessions")
+                    }
+                    .font(.ui(13, .medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 6)
+                    .frame(height: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 if s.active { ActivePill() }
-                Button { model.openWindow?(s.id, .overview) } label: { Label("Open in window", systemImage: "macwindow") }
-                    .controlSize(.small)
+                Button { model.openWindow?(s.id, .overview) } label: { IconLabel(title: "Open in window", symbol: "macwindow") }
+                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 26, padding: 10, fontSize: 12))
                     .help("Open this session in the main window")
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            Divider()
+            Rectangle().fill(Theme.line).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(s.title).font(.system(size: 17, weight: .semibold)).textSelection(.enabled).lineLimit(3)
-                        Text(metaLine(s)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(s.title).font(.ui(17, .semibold)).tracking(-0.17).textSelection(.enabled).lineLimit(3)
+                        Text(metaLine(s)).font(.ui(12)).foregroundStyle(Theme.text3).lineLimit(1)
                     }
                     HStack(spacing: 8) {
                         StatCard(label: "Cost", value: Format.dollars(s.costMicros))
@@ -44,39 +64,42 @@ struct SessionDetailView: View {
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         UsageBar(usage: s.usage, legend: false)
-                        UsageTable(session: s, compact: true)
+                        UsageTable(session: s, anatomy: anatomy, compact: true)
                     }
                     TopTipLink(session: s)
                     if let p = s.lastPrompt ?? s.firstPrompt {
                         VStack(alignment: .leading, spacing: 3) {
-                            SectionLabel(s.lastPrompt != nil ? "Last prompt" : "First prompt")
-                            Text(p).lineLimit(4).textSelection(.enabled)
+                            Text((s.lastPrompt != nil ? "Last prompt" : "First prompt").uppercased())
+                                .font(.ui(11, .semibold)).tracking(0.44).foregroundStyle(Theme.text3)
+                            Text(p).lineSpacing(2.5).lineLimit(4).textSelection(.enabled)
                         }
                     }
-                    Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 2) {
-                        GridRow { label("Project"); CopyableValue(text: s.projectDir, help: "Copy the project path") }
-                        if let b = s.gitBranch { GridRow { label("Branch"); CopyableValue(text: b, help: "Copy the branch name") } }
-                        GridRow { label("Prompts"); Text(promptsLine(s)).font(.callout) }
-                        GridRow { label("Transcript"); Text([Format.bytes(s.sizeBytes), s.version.map { "Claude Code \($0)" }].compactMap { $0 }.joined(separator: " · ")).font(.callout) }
-                        GridRow { label("Session id"); CopyableValue(text: s.id, help: "Copy the session id") }
+                    Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 0) {
+                        GridRow { label("Project", 22); CopyableValue(text: Theme.shortPath(s.projectDir), help: "Copy the project path") }
+                        GridRow { label("Prompts", 22); value(promptsLine(s), 22) }
+                        GridRow { label("Transcript", 22); value(transcriptLine(s), 22) }
+                        GridRow { label("Session id", 22); CopyableValue(text: s.id, help: "Copy the session id") }
                     }
+                    .font(.ui(12))
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
+            Rectangle().fill(Theme.line).frame(height: 1)
             HStack(spacing: 8) {
-                Button { model.resumeInTerminal(s) } label: { Label("Resume in Terminal", systemImage: "terminal") }
-                    .buttonStyle(.borderedProminent)
-                Button { model.copyResumeCommand(s) } label: { Label("Copy command", systemImage: "doc.on.doc") }
+                Button { model.resumeInTerminal(s) } label: { IconLabel(title: "Resume in Terminal", symbol: "terminal", iconSize: 14) }
+                    .buttonStyle(DesignButtonStyle(kind: .primary, height: 28, padding: 12))
+                Button { model.copyResumeCommand(s) } label: { IconLabel(title: "Copy command", symbol: "doc.on.doc", iconSize: 14) }
+                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 28, padding: 10))
                     .help(Resume.command(s))
                 Spacer()
-                iconButton("doc.text.magnifyingglass", "Show the transcript in Finder") { model.revealTranscript(s) }
-                iconButton("folder", "Open the project folder") { model.openProjectFolder(s) }
-                iconButton("number", "Copy the session id") { model.copy(s.id) }
+                SmallIconButton(symbol: "doc.text", help: "Show the transcript in Finder", size: 28, fill: Theme.bg) { model.revealTranscript(s) }
+                SmallIconButton(symbol: "folder", help: "Open the project folder", size: 28, fill: Theme.bg) { model.openProjectFolder(s) }
+                SmallIconButton(symbol: "number", help: "Copy the session id", size: 28, fill: Theme.bg) { model.copy(s.id) }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            .background(Theme.bg)
         }
     }
 
@@ -84,33 +107,42 @@ struct SessionDetailView: View {
 
     private var overview: some View {
         let s = session
+        let a = anatomy
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                     StatCard(label: "API-equivalent cost", value: Format.dollars(s.costMicros), detail: limitShare(s), big: true)
                     StatCard(label: "Tokens", value: Format.tokens(s.usage.total),
                              detail: "\(Format.percent(s.usage.cacheHitRatio)) of input from cache", big: true)
                     StatCard(label: "Model calls", value: "\(s.usage.requests)", detail: callsLine(s), big: true)
-                    StatCard(label: "Prompts", value: "\(s.prompts)",
-                             detail: "\(s.subagents) subagent\(s.subagents == 1 ? "" : "s")", big: true)
+                    StatCard(label: "Average context", value: a?.contextSize.map { Format.tokens($0.average) } ?? "–",
+                             detail: a.flatMap(contextLine), big: true)
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Tokens by kind").font(.headline)
-                    UsageBar(usage: s.usage, height: 8)
-                    UsageTable(session: s, compact: false)
+                    Text("Tokens by kind").font(.ui(13, .semibold))
+                    UsageBar(usage: s.usage, legend: false, height: 8)
+                    UsageTable(session: s, anatomy: a, compact: false)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 28) { facts(s); prompts(s) }
-                    VStack(alignment: .leading, spacing: 22) { facts(s); prompts(s) }
+                // Two columns of at least 300 with a gap of 28, else one.
+                let columns = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
+                    : AnyLayout(VStackLayout(alignment: .leading, spacing: 22))
+                columns {
+                    facts(s)
+                    prompts(s, a)
                 }
+                .onGeometryChange(for: Bool.self) { $0.size.width >= 628 } action: { wide = $0 }
                 HStack(spacing: 8) {
-                    Button { model.resumeInTerminal(s) } label: { Label("Resume in Terminal", systemImage: "terminal") }
-                        .buttonStyle(.borderedProminent)
-                    Button { model.copyResumeCommand(s) } label: { Label("Copy resume command", systemImage: "doc.on.doc") }
-                    Button { model.revealTranscript(s) } label: { Label("Show transcript", systemImage: "doc.text.magnifyingglass") }
-                    Button { model.openProjectFolder(s) } label: { Label("Open folder", systemImage: "folder") }
+                    Button { model.resumeInTerminal(s) } label: { IconLabel(title: "Resume in Terminal", symbol: "terminal", iconSize: 14) }
+                        .buttonStyle(DesignButtonStyle(kind: .primary, height: 30, radius: 7, padding: 14))
+                    Button("Copy resume command") { model.copyResumeCommand(s) }
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
+                        .help(Resume.command(s))
+                    Button("Show transcript") { model.revealTranscript(s) }
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
+                    Button("Open folder") { model.openProjectFolder(s) }
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
                 }
-                .controlSize(.large)
+                .padding(.top, 4)
             }
             .padding(24)
             .frame(maxWidth: 980, alignment: .leading)
@@ -120,35 +152,38 @@ struct SessionDetailView: View {
 
     private func facts(_ s: Session) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Facts").font(.headline)
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 3) {
-                GridRow { label("Project"); CopyableValue(text: s.projectDir, help: "Copy the project path") }
-                if let b = s.gitBranch { GridRow { label("Branch"); CopyableValue(text: b, help: "Copy the branch name") } }
-                if let t = s.startedAt { GridRow { label("Started"); Text(t.formatted(date: .abbreviated, time: .shortened)).font(.callout) } }
-                GridRow {
-                    label("Last activity")
-                    Text("\(s.lastActivity.formatted(date: .abbreviated, time: .shortened)) (\(Format.ago(s.lastActivity, now: model.now)))").font(.callout)
+            Text("Facts").font(.ui(13, .semibold)).padding(.bottom, 4)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 0) {
+                GridRow { label("Project", 24); CopyableValue(text: Theme.shortPath(s.projectDir), help: "Copy the project path", size: 12, rowHeight: 24) }
+                if let b = s.gitBranch {
+                    GridRow { label("Branch", 24); CopyableValue(text: b, help: "Copy the branch name", size: 12, rowHeight: 24) }
                 }
-                GridRow { label("Prompts"); Text(promptsLine(s)).font(.callout) }
-                GridRow { label("Transcript"); Text(Format.bytes(s.sizeBytes)).font(.callout) }
-                if let v = s.version { GridRow { label("Claude Code"); Text(v).font(.callout) } }
-                GridRow { label("Session id"); CopyableValue(text: s.id, help: "Copy the session id") }
+                if let t = s.startedAt { GridRow { label("Started", 24); value(Self.dateTime(t), 24) } }
+                GridRow {
+                    label("Last activity", 24)
+                    value("\(Self.dateTime(s.lastActivity)) (\(Format.ago(s.lastActivity, now: model.now)))", 24)
+                }
+                GridRow { label("Prompts", 24); value(promptsLine(s), 24) }
+                GridRow { label("Transcript", 24); value(transcriptLine(s), 24) }
+                GridRow { label("Session id", 24); CopyableValue(text: s.id, help: "Copy the session id", size: 12, rowHeight: 24) }
                 if let next = s.continuedIn {
                     GridRow {
-                        label("Continued in")
+                        label("Continued in", 24)
                         Button(String(next.prefix(8))) { model.windowSelectedID = next }.buttonStyle(.link)
                     }
                 }
             }
+            .font(.ui(12.5))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func prompts(_ s: Session) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Prompts").font(.headline)
-            if let p = s.firstPrompt { promptCard("First", p, s.startedAt) }
-            if let p = s.lastPrompt, p != s.firstPrompt { promptCard("Last", p, nil) }
+    private func prompts(_ s: Session, _ a: Anatomy?) -> some View {
+        let times = a?.promptTimes
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Prompts").font(.ui(13, .semibold))
+            if let p = s.firstPrompt { promptCard("First", p, times?.first ?? s.startedAt) }
+            if let p = s.lastPrompt, p != s.firstPrompt { promptCard("Last", p, times?.last) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -156,33 +191,46 @@ struct SessionDetailView: View {
     private func promptCard(_ title: String, _ text: String, _ at: Date?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text([title, at.map { $0.formatted(date: .omitted, time: .shortened) }].compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            Text(text).textSelection(.enabled).lineLimit(8)
+                .font(.ui(11)).foregroundStyle(Theme.text3)
+            Text(text).lineSpacing(3).textSelection(.enabled).lineLimit(8)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.cardStroke))
+        .background(Theme.soft, in: RoundedRectangle(cornerRadius: 9))
     }
 
     // MARK: Parts
 
-    private func label(_ text: String) -> some View {
-        Text(text).font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+    private func label(_ text: String, _ height: CGFloat) -> some View {
+        Text(text).foregroundStyle(Theme.text3).frame(minHeight: height).gridColumnAlignment(.leading)
     }
 
-    private func iconButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).frame(width: 18, height: 18) }
-            .help(help)
-            .accessibilityLabel(help)
+    private func value(_ text: String, _ height: CGFloat) -> some View {
+        Text(text).frame(minHeight: height)
     }
+
+    /// `3 Nov 2026, 09:12`
+    static func dateTime(_ d: Date) -> String {
+        dateTimeFormat.string(from: d)
+    }
+
+    private static let dateTimeFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = DateFormatter.dateFormat(fromTemplate: "dMMMyyyy", options: 0, locale: .current).map { $0 + ", " } ?? ""
+        f.dateFormat += DateFormatter.dateFormat(fromTemplate: "jjmm", options: 0, locale: .current) ?? "HH:mm"
+        return f
+    }()
 
     private func metaLine(_ s: Session) -> String {
         var parts = [s.projectName]
         if let b = s.gitBranch { parts.append(b) }
-        if let t = s.startedAt { parts.append("started \(t.formatted(date: .omitted, time: .shortened))") }
-        parts.append("last activity \(Format.ago(s.lastActivity, now: model.now))")
+        let last = "last activity \(Format.ago(s.lastActivity, now: model.now))"
+        if let t = s.startedAt {
+            parts.append("started \(t.formatted(date: .omitted, time: .shortened)), \(last)")
+        } else {
+            parts.append(last)
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -190,10 +238,20 @@ struct SessionDetailView: View {
         "\(s.prompts) typed, \(s.usage.requests) model calls, \(s.subagents) subagent\(s.subagents == 1 ? "" : "s")"
     }
 
+    private func transcriptLine(_ s: Session) -> String {
+        [Format.bytes(s.sizeBytes), s.version.map { "Claude Code \($0)" }].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private func callsLine(_ s: Session) -> String {
         let sub = s.subagentUsage.requests
         guard sub > 0 else { return "all in the main session" }
-        return "\(s.usage.requests - min(sub, s.usage.requests)) main · \(sub) in subagents"
+        return "\(s.usage.requests - min(sub, s.usage.requests)) main · \(sub) in \(s.subagents) subagent\(s.subagents == 1 ? "" : "s")"
+    }
+
+    private func contextLine(_ a: Anatomy) -> String? {
+        guard let c = a.contextSize else { return nil }
+        let n = a.lane("main")?.events.filter { $0.kind == .compact }.count ?? 0
+        return "max \(Format.tokens(c.max)) · \(n) compaction\(n == 1 ? "" : "s")"
     }
 
     private func limitShare(_ s: Session) -> String? {
@@ -209,11 +267,11 @@ struct ActivePill: View {
             Circle().fill(Theme.ok).frame(width: 6, height: 6)
             Text("Active")
         }
-        .font(.caption.weight(.medium))
+        .font(.ui(11, .medium))
         .foregroundStyle(Theme.ok)
         .padding(.horizontal, 8)
         .frame(height: 20)
-        .background(Theme.ok.opacity(0.12), in: Capsule())
+        .background(Theme.ok.opacity(0.10), in: Capsule())
     }
 }
 
@@ -228,19 +286,20 @@ struct TopTipLink: View {
             if case let .loaded(a, _) = model.anatomies[session.id], let tip = Self.best(a.spend.tips) {
                 Button { model.openWindow?(session.id, .spend) } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "lightbulb").font(.system(size: 16)).foregroundStyle(Color.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(headline(tip)).fontWeight(.semibold).lineLimit(1)
-                            Text(more(a.spend.tips.count)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Image(systemName: "lightbulb").font(.system(size: 16)).foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(headline(tip)).font(.ui(13, .semibold)).lineLimit(1)
+                            Text(more(a.spend.tips.count)).font(.ui(12)).foregroundStyle(Theme.text2).lineLimit(2)
                         }
                         Spacer(minLength: 4)
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
                     }
+                    .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.accentColor.opacity(0.2)))
+                    .background(Theme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.accent.opacity(0.18)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -264,48 +323,85 @@ struct TopTipLink: View {
     }
 }
 
-/// Tokens by kind for the whole session, its subagents, and each model.
+/// Tokens by kind for the whole session and each model; in the window also
+/// the subagents and the calls. The cost of a model or the subagents comes
+/// from the anatomy, so it is empty until that is read.
 struct UsageTable: View {
     let session: Session
+    var anatomy: Anatomy?
     var compact = false
 
+    private struct Row: Identifiable {
+        let id: String
+        let name: String
+        var note: String?
+        let usage: TokenUsage
+        let cost: UInt64?
+        var bold = false
+        var mono = false
+    }
+
+    private var rows: [Row] {
+        let costs = anatomy?.costByModel
+        var out = [Row(id: "all", name: "All", usage: session.usage, cost: session.costMicros, bold: true)]
+        if !compact, session.subagents > 0 {
+            out.append(Row(id: "sub", name: "Subagents", usage: session.subagentUsage, cost: anatomy?.subagentCostMicros))
+        }
+        for m in session.models {
+            var note: String?
+            if compact, let a = anatomy {
+                let mainModel = a.lane("main")?.model
+                let n = a.lanes.filter { $0.id != "main" && $0.model == m.model }.count
+                if n > 0, m.model != mainModel { note = "\(n) subagent\(n == 1 ? "" : "s")" }
+            }
+            out.append(Row(id: m.model, name: compact ? m.model.replacingOccurrences(of: "claude-", with: "") : m.model,
+                           note: note, usage: m.usage, cost: costs?[m.model], mono: true))
+        }
+        return out
+    }
+
     var body: some View {
-        let rows: [(String, TokenUsage, String?)] = [("All", session.usage, Format.dollars(session.costMicros))]
-            + (session.subagents > 0 ? [("Subagents", session.subagentUsage, nil)] : [])
-            + session.models.map { (compact ? $0.model.replacingOccurrences(of: "claude-", with: "") : $0.model, $0.usage, nil) }
-        Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: compact ? 4 : 6) {
+        let size: CGFloat = compact ? 12 : 12.5
+        let pad: CGFloat = compact ? 4 : 7
+        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 0) {
             GridRow {
-                Text("").gridColumnAlignment(.leading)
+                Text(compact ? "Model" : "Who").frame(maxWidth: .infinity, alignment: .leading)
                 head("Input", Theme.input)
                 head("Cache write", Theme.cacheWrite)
                 head("Cache read", Theme.cacheRead)
                 head("Output", Theme.output)
-                Text("Calls")
+                if !compact { Text("Calls") }
                 Text("Cost")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Divider()
-            ForEach(rows, id: \.0) { name, u, cost in
+            .font(.ui(11, .medium))
+            .foregroundStyle(Theme.text3)
+            .padding(.vertical, compact ? 3 : 6)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
+                Rectangle().fill(i == 0 ? Theme.line : Theme.line2).frame(height: 1).gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    Text(name).lineLimit(1).fontWeight(name == "All" ? .semibold : .regular)
-                        .font(name.contains("-") ? .system(compact ? .caption : .callout, design: .monospaced) : nil)
-                    Text(Format.tokens(u.inputTokens))
-                    Text(Format.tokens(u.cacheWriteTokens))
-                    Text(Format.tokens(u.cacheReadTokens))
-                    Text(Format.tokens(u.outputTokens))
-                    Text("\(u.requests)")
-                    Text(cost ?? "").fontWeight(.semibold)
+                    HStack(spacing: 0) {
+                        Text(row.name).font(row.mono ? .mono(compact ? 11.5 : 12) : .ui(size, row.bold ? .semibold : .regular))
+                        if let note = row.note { Text(" · \(note)").font(.ui(size)).foregroundStyle(Theme.text3) }
+                    }
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(Format.tokens(row.usage.inputTokens))
+                    Text(Format.tokens(row.usage.cacheWriteTokens))
+                    Text(Format.tokens(row.usage.cacheReadTokens))
+                    Text(Format.tokens(row.usage.outputTokens))
+                    if !compact { Text("\(row.usage.requests)") }
+                    Text(row.cost.map(Format.dollars) ?? "").fontWeight(row.bold ? .semibold : .regular)
                 }
+                .font(.ui(size))
                 .monospacedDigit()
+                .padding(.vertical, pad)
             }
         }
-        .font(compact ? .caption : .callout)
     }
 
     private func head(_ title: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
+        HStack(spacing: compact ? 4 : 5) {
+            Circle().fill(color).frame(width: compact ? 6 : 7, height: compact ? 6 : 7)
             Text(title)
         }
     }

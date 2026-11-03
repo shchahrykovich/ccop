@@ -1,9 +1,33 @@
+import AppKit
 import CCOPKit
 import Charts
 import SwiftUI
 
-/// The soft background of the side panel.
-private let panelBackground = Theme.dynamic(0xF7F7F8, 0x2A2A2D)
+/// The colours of the design board (WindowContext), local to this tab.
+private enum Ink {
+    /// `--text`
+    static let text = Theme.dynamic(0x1D1D1F, 0xF5F5F7)
+    /// `--text2`
+    static let text2 = Theme.dynamic(0x5F5F64, 0xB9B9BF)
+    /// `--text3`
+    static let text3 = Theme.dynamic(0x6E6E73, 0xA1A1A8)
+    /// `--line`: rgba(0,0,0,.10)
+    static let line = alpha(0.10, 0.14)
+    /// `--line2`: rgba(0,0,0,.06)
+    static let line2 = alpha(0.06, 0.09)
+    /// `--soft`
+    static let soft = Theme.dynamic(0xF7F7F8, 0x2A2A2D)
+    /// `--bg`
+    static let bg = Theme.page
+
+    /// Black with `light` alpha in light mode, white with `dark` alpha in dark mode.
+    static func alpha(_ light: CGFloat, _ dark: CGFloat) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 1, alpha: dark) : NSColor(white: 0, alpha: light)
+        })
+    }
+}
 
 /// What filled the context window, call by call, and what added the most.
 struct ContextView: View {
@@ -12,81 +36,87 @@ struct ContextView: View {
     @State private var selectedCall: Int?
     @State private var width: CGFloat = 1000
 
-    /// Narrower than this, the side panel goes under the chart.
-    private static let sideBySide: CGFloat = 760
+    /// The chart column's and the side panel's flex basis, and the gap between
+    /// them. Narrower than their sum, the side panel goes under the chart.
+    private static let chartBasis: CGFloat = 460
+    /// 240 of content + 2 × 14 padding + 2 × 1 border (the board's aside is content-box).
+    private static let asideBasis: CGFloat = 270
+    private static let gap: CGFloat = 20
 
     var body: some View {
         let lanes = anatomy.lanesInTreeOrder.filter { !$0.context.isEmpty }
-        let lane = anatomy.lane(laneID) ?? lanes.first
+        let lane = anatomy.lane(laneID).flatMap { $0.context.isEmpty ? nil : $0 } ?? lanes.first
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                header(lanes)
+                header(lanes, current: lane)
                 if let lane, !lane.context.isEmpty {
                     let index = min(max((selectedCall ?? lane.context.count) - 1, 0), lane.context.count - 1)
-                    let wide = width >= Self.sideBySide
-                    let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 20))
-                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                    let free = width - Self.chartBasis - Self.gap - Self.asideBasis
+                    let wide = free >= 0
+                    // As `flex: 999 1 460px` beside `flex: 1 1 240px`: the panel gets 1/1000 of the free width.
+                    let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: Self.gap))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: Self.gap))
                     layout {
                         ContextChart(lane: lane, selectedCall: $selectedCall, shownCall: index + 1)
                             .frame(maxWidth: .infinity)
                         ContextBreakdown(lane: lane, point: lane.context[index], call: index + 1)
-                            .frame(width: wide ? 270 : nil)
+                            .frame(width: wide ? Self.asideBasis + free / 1000 : nil)
                             .frame(maxWidth: wide ? nil : .infinity)
                     }
                 } else {
-                    Text("This session has no model calls with token counts.").foregroundStyle(.secondary)
+                    Text("This session has no model calls with token counts.")
+                        .font(.system(size: 13)).foregroundStyle(Ink.text3)
                 }
                 Contributors(anatomy: anatomy)
                     .frame(maxWidth: 900, alignment: .leading)
             }
+            .foregroundStyle(Ink.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .padding(.horizontal, 24)
             .padding(.top, 18)
             .padding(.bottom, 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
         .onChange(of: laneID) { selectedCall = nil }
     }
 
-    private func header(_ lanes: [AnatomyLane]) -> some View {
-        HStack(spacing: 14) {
+    private func header(_ lanes: [AnatomyLane], current: AnatomyLane?) -> some View {
+        FlowRows(spacing: 14, lineSpacing: 10) {
             Text("Context at each model call").font(.system(size: 13, weight: .semibold))
-            Picker("Lane", selection: $laneID) {
-                ForEach(lanes) { l in
-                    Text("\(l.name) · \(l.context.count) \(l.context.count == 1 ? "call" : "calls")").tag(l.id)
-                }
+            if !lanes.isEmpty {
+                LanePicker(lanes: lanes, current: current, selection: $laneID)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .fixedSize()
             Text("The size is exact. The split into parts is estimated.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-                .lineLimit(1)
+                .font(.system(size: 12)).foregroundStyle(Ink.text3)
                 .help("The size of the context at each model call is exact: the call's input tokens. The split into parts is estimated: the growth from one call to the next goes first to Claude's previous output, and the rest to the prompts and tool results that came between, by their size in bytes. “Start” is the first call: system prompt, tool definitions, instructions and the first prompt.")
-            Spacer(minLength: 0)
         }
     }
 }
 
-/// Names and colors of the context parts. A tool part is drawn in the series
-/// of its tool family, so the chart has one area per color.
+/// The series of the chart, their colours and names. A tool part is drawn in
+/// the series of its tool family, so the chart has one area per colour.
 enum ContextColors {
-    static let start = Theme.dynamic(0xB4B4BA, 0x636366)
+    /// Bottom to top of the stack.
+    static let stack = ["Start", "Compacted summary", "Claude output", "Prompts", "Read", "Bash", "Edit", "Other tools", "Other"]
+
+    static let start = Theme.dynamic(0xB4B4BA, 0x6C6C72)
     static let summary = Theme.dynamic(0x57575C, 0xA1A1A8)
+    static let output = Theme.dynamic(0x8B5CF6, 0xA78BFA)
+    static let prompts = Theme.dynamic(0x22A35A, 0x3CCB7F)
+    static let read = Theme.dynamic(0xD9A21B, 0xE8B83A)
+    static let bash = Theme.dynamic(0x14A89A, 0x2DD4BF)
+    static let edit = Theme.dynamic(0xE0559A, 0xF472B6)
+    static let otherTools = Theme.dynamic(0x6D67E8, 0x8D88F2)
+    /// Growth with no prompt or tool result before it (`context.rs`: `Other`).
     static let other = Theme.dynamic(0xA8A29E, 0x78716C)
 
     /// The series of a part, as `context.rs` names parts.
     static func series(_ part: String) -> String {
-        guard part.hasPrefix("Tool: ") else { return part }
-        // The same families as `Theme.tool`.
+        guard part.hasPrefix("Tool: ") else { return stack.contains(part) ? part : "Other" }
         switch String(part.dropFirst(6)) {
-        case "Bash", "BashOutput", "KillShell": return "Bash"
         case "Read", "NotebookRead": return "Read"
-        case "Edit", "MultiEdit", "Write", "NotebookEdit": return "Edit and Write"
-        case "Grep", "Glob", "LS": return "Search"
-        case "Agent", "Task": return "Subagents"
-        case "WebFetch", "WebSearch": return "Web"
+        case "Bash", "BashOutput", "KillShell": return "Bash"
+        case "Edit", "MultiEdit", "Write", "NotebookEdit": return "Edit"
         default: return "Other tools"
         }
     }
@@ -95,42 +125,128 @@ enum ContextColors {
         switch series {
         case "Start": start
         case "Compacted summary": summary
-        case "Claude output": Theme.output
-        case "Prompts": Theme.prompt
-        case "Other": other
-        case "Bash": Theme.bash
-        case "Read": Theme.read
-        case "Edit and Write": Theme.edit
-        case "Search": Theme.grep
-        // Lighter, so it differs from "Claude output", which has the same hue.
-        case "Subagents": Theme.agent.opacity(0.5)
-        case "Web": Theme.web
-        default: Theme.otherTool
+        case "Claude output": output
+        case "Prompts": prompts
+        case "Read": read
+        case "Bash": bash
+        case "Edit": edit
+        case "Other tools": otherTools
+        default: other
         }
     }
 
     static func color(_ part: String) -> Color { color(series: series(part)) }
 
-    /// A part or series name as shown: `Tool: Bash` → `Bash`, `Prompts` → `Your prompts` in the main lane.
+    /// A series or part name as shown: `Prompts` → `Your prompts` in the main lane, `Tool: Grep` → `Grep`.
     static func label(_ name: String, main: Bool) -> String {
         if name.hasPrefix("Tool: ") { return String(name.dropFirst(6)) }
-        if name == "Prompts", main { return "Your prompts" }
+        if name == "Prompts" { return main ? "Your prompts" : "Prompts" }
         return name
     }
 
-    /// Series in a stable order: Start, Compacted summary, Claude output,
-    /// Prompts, then tool families by their largest size, then Other.
-    static func order(_ points: [ContextPoint]) -> [String] {
-        var largest: [String: UInt64] = [:]
-        for p in points {
-            var sums: [String: UInt64] = [:]
-            for part in p.parts { sums[series(part.name), default: 0] += part.tokens }
-            for (s, n) in sums { largest[s] = max(largest[s] ?? 0, n) }
+    /// The tokens of one call by series.
+    static func sums(_ point: ContextPoint) -> [String: UInt64] {
+        var out: [String: UInt64] = [:]
+        for part in point.parts { out[series(part.name), default: 0] += part.tokens }
+        return out
+    }
+
+    /// The series that some call of the lane has, bottom to top.
+    static func present(_ points: [ContextPoint]) -> [String] {
+        var seen = Set<String>()
+        for p in points { for part in p.parts where part.tokens > 0 { seen.insert(series(part.name)) } }
+        return stack.filter(seen.contains)
+    }
+}
+
+/// `Main · 168 calls`, with a chevron, as the board's button; a click opens a menu of the lanes.
+private struct LanePicker: View {
+    let lanes: [AnatomyLane]
+    let current: AnatomyLane?
+    @Binding var selection: String
+    @State private var anchor = MenuAnchor()
+
+    var body: some View {
+        Button(action: showMenu) {
+            HStack(spacing: 6) {
+                Text(current.map(Self.title) ?? "")
+                Chevron()
+                    .stroke(style: StrokeStyle(lineWidth: 1.125, lineCap: .round, lineJoin: .round))
+                    .frame(width: 9, height: 9)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Ink.text)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(Ink.bg, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Ink.line, lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        let fixed = ["Start", "Compacted summary", "Claude output", "Prompts"]
-        let tools = largest.keys.filter { !fixed.contains($0) && $0 != "Other" }
-            .sorted { (largest[$0] ?? 0, $1) > (largest[$1] ?? 0, $0) }
-        return fixed.filter { largest[$0] != nil } + tools + (largest["Other"] != nil ? ["Other"] : [])
+        .buttonStyle(.plain)
+        .background(MenuAnchorView(anchor: anchor))
+        .accessibilityLabel("Lane: \(current.map(Self.title) ?? "")")
+        .help("Choose the main session or a subagent")
+    }
+
+    static func title(_ lane: AnatomyLane) -> String {
+        let name = lane.id == "main" ? "Main" : lane.name
+        let n = lane.context.count
+        return "\(name) · \(n) \(n == 1 ? "call" : "calls")"
+    }
+
+    private func showMenu() {
+        guard let view = anchor.view else { return }
+        let binding = $selection
+        let target = MenuTarget { binding.wrappedValue = $0 }
+        let menu = NSMenu()
+        for lane in lanes {
+            let item = NSMenuItem(title: Self.title(lane), action: #selector(MenuTarget.pick(_:)), keyEquivalent: "")
+            item.target = target
+            item.representedObject = lane.id
+            item.state = lane.id == current?.id ? .on : .off
+            menu.addItem(item)
+        }
+        // The menu's top-left corner 4 pt under the button.
+        let y = view.isFlipped ? view.bounds.height + 4 : -4
+        withExtendedLifetime(target) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: 0, y: y), in: view)
+        }
+    }
+}
+
+/// The board's chevron: `M4 6l4 4 4-4` in a 16 × 16 box.
+private struct Chevron: Shape {
+    func path(in rect: CGRect) -> Path {
+        let s = rect.width / 16
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX + 4 * s, y: rect.minY + 6 * s))
+        p.addLine(to: CGPoint(x: rect.minX + 8 * s, y: rect.minY + 10 * s))
+        p.addLine(to: CGPoint(x: rect.minX + 12 * s, y: rect.minY + 6 * s))
+        return p
+    }
+}
+
+private final class MenuAnchor {
+    weak var view: NSView?
+}
+
+/// An empty AppKit view behind the button, so the menu can open at it.
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchor
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
+}
+
+private final class MenuTarget: NSObject {
+    let action: (String) -> Void
+    init(_ action: @escaping (String) -> Void) { self.action = action }
+    @objc func pick(_ item: NSMenuItem) {
+        if let id = item.representedObject as? String { action(id) }
     }
 }
 
@@ -139,6 +255,12 @@ struct ContextChart: View {
     @Binding var selectedCall: Int?
     /// The call shown in the side panel: the selected one, or the last.
     let shownCall: Int
+
+    private static let height: CGFloat = 300
+    /// The room for the y labels left of the plot.
+    private static let gutter: CGFloat = 40
+    /// Grid lines above the base line; the top one is the top of the plot.
+    private static let lines = 4
 
     struct Mark: Identifiable {
         var call: Int
@@ -153,85 +275,151 @@ struct ContextChart: View {
         let step = max(1, points.count / 400)
         var out: [Mark] = []
         for i in stride(from: 0, to: points.count, by: step) {
-            var sums: [String: UInt64] = [:]
-            for part in points[i].parts { sums[ContextColors.series(part.name), default: 0] += part.tokens }
+            let sums = ContextColors.sums(points[i])
             for name in names { out.append(Mark(call: i + 1, series: name, tokens: Double(sums[name] ?? 0))) }
         }
         return out
     }
 
+    /// A round step, so that `lines` steps hold the largest context: 148K → 40K (top 160K).
+    static func gridStep(for largest: UInt64) -> UInt64 {
+        let raw = max(Double(largest), 1000) / Double(lines)
+        let magnitude = pow(10, floor(log10(raw)))
+        let factor = [1, 2, 2.5, 4, 5, 10].first { $0 * magnitude >= raw } ?? 10
+        return UInt64((factor * magnitude).rounded())
+    }
+
     var body: some View {
-        let names = ContextColors.order(lane.context)
+        let names = ContextColors.present(lane.context)
         let count = lane.context.count
         let compactions = compactionCalls()
-        let shown = lane.context[min(max(shownCall, 1), count) - 1]
-        let labels = Array(Set([1, (count + 1) / 2, count])).sorted()
-        VStack(alignment: .leading, spacing: 10) {
-            Chart {
-                ForEach(marks(names)) { m in
-                    AreaMark(x: .value("Model call", m.call), y: .value("Tokens", m.tokens), stacking: .standard)
-                        .foregroundStyle(by: .value("Part", m.series))
-                        .interpolationMethod(.stepEnd)
-                }
-                ForEach(compactions, id: \.self) { c in
-                    RuleMark(x: .value("Model call", c))
-                        .foregroundStyle(Theme.bad)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                        .annotation(position: .top, alignment: .center, spacing: 3,
-                                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
-                            Text("compacted").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.bad)
-                        }
-                }
-                RuleMark(x: .value("Model call", shownCall))
-                    .foregroundStyle(Color.primary.opacity(0.8))
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                PointMark(x: .value("Model call", shownCall), y: .value("Tokens", Double(shown.total)))
-                    .symbol {
-                        Circle()
-                            .fill(Color(nsColor: .controlBackgroundColor))
-                            .overlay(Circle().strokeBorder(Color.primary, lineWidth: 2))
-                            .frame(width: 9, height: 9)
-                    }
-            }
-            .chartForegroundStyleScale(domain: names, range: names.map { ContextColors.color(series: $0) })
-            .chartLegend(.hidden)
-            .chartXSelection(value: $selectedCall)
-            .chartXScale(domain: 1 ... max(count, 2))
-            .chartXAxis {
-                AxisMarks(values: labels) { v in
-                    if let c = v.as(Int.self), (1 ... count).contains(c) {
-                        AxisValueLabel(anchor: c == 1 && count > 1 ? .topLeading : c == count && count > 1 ? .topTrailing : .top) {
-                            Text("call \(c) · \(lane.context[c - 1].at.formatted(date: .omitted, time: .shortened))")
-                                .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
-                        }
+        let shownIndex = min(max(shownCall, 1), count) - 1
+        let step = Self.gridStep(for: lane.context.map(\.total).max() ?? 0)
+        let top = Double(step) * Double(Self.lines)
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                grid(step)
+                Chart {
+                    ForEach(marks(names)) { m in
+                        AreaMark(x: .value("Model call", m.call), y: .value("Tokens", m.tokens), stacking: .standard)
+                            .foregroundStyle(by: .value("Part", m.series))
+                            .interpolationMethod(.linear)
                     }
                 }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { v in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 1)).foregroundStyle(Color.primary.opacity(0.07))
-                    AxisValueLabel {
-                        if let d = v.as(Double.self) {
-                            Text(Format.tokens(UInt64(max(0, d)))).font(.system(size: 10.5)).foregroundStyle(.secondary).monospacedDigit()
+                .chartForegroundStyleScale(domain: names, range: names.map { ContextColors.color(series: $0) })
+                .chartLegend(.hidden)
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartXScale(domain: 1 ... max(count, 2))
+                .chartYScale(domain: 0 ... top)
+                .chartXSelection(value: $selectedCall)
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        if let plot = proxy.plotFrame.map({ geo[$0] }) {
+                            let xs = compactions.compactMap { proxy.position(forX: $0).map { plot.minX + $0 } }
+                            ForEach(Array(Self.labelled(xs).enumerated()), id: \.offset) { _, mark in
+                                compactionMark(x: mark.x, labelled: mark.labelled, plot: plot)
+                            }
+                            if let x = proxy.position(forX: shownIndex + 1),
+                               let y = proxy.position(forY: Double(lane.context[shownIndex].total)) {
+                                selectionMark(x: plot.minX + x, y: plot.minY + y, plot: plot)
+                            }
                         }
                     }
+                    .allowsHitTesting(false)
                 }
+                .padding(.leading, Self.gutter)
             }
-            .frame(height: 300)
-            .padding(.top, compactions.isEmpty ? 0 : 16)
+            .frame(height: Self.height)
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("Stacked area chart of the context at each of \(count) model calls")
 
-            ContextLegendFlow(spacing: 14, lineSpacing: 6) {
+            xLabels(count)
+                .padding(.leading, Self.gutter)
+
+            FlowRows(spacing: 14, lineSpacing: 6) {
                 ForEach(names, id: \.self) { name in
                     HStack(spacing: 5) {
                         RoundedRectangle(cornerRadius: 2).fill(ContextColors.color(series: name)).frame(width: 9, height: 9)
                         Text(ContextColors.label(name, main: lane.id == "main"))
                     }
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Ink.text2)
                 }
             }
+            .padding(.leading, Self.gutter)
         }
+    }
+
+    /// Horizontal lines from the left edge of the labels to the right of the
+    /// plot, with the label on each line, as the board draws them.
+    private func grid(_ step: UInt64) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(1 ... Self.lines, id: \.self) { k in
+                let y = Self.height - Self.height * CGFloat(k) / CGFloat(Self.lines)
+                Rectangle().fill(Ink.line2).frame(height: 1).frame(maxWidth: .infinity).offset(y: y)
+                Text(Format.tokens(step * UInt64(k)))
+                    .font(.system(size: 10.5)).monospacedDigit()
+                    .foregroundStyle(Ink.text3)
+                    .offset(y: y - 7)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityHidden(true)
+    }
+
+    /// A 2 pt red line from 4 pt above the plot to its bottom, `compacted` 20 pt above.
+    private func compactionMark(x: CGFloat, labelled: Bool, plot: CGRect) -> some View {
+        ZStack {
+            Rectangle().fill(Theme.bad)
+                .frame(width: 2, height: plot.height + 4)
+                .position(x: x + 1, y: (plot.minY - 4 + plot.maxY) / 2)
+            if labelled {
+                Text("compacted")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.bad)
+                    .fixedSize()
+                    .position(x: min(max(x, plot.minX - Self.gutter + 30), plot.maxX - 30), y: plot.minY - 20 + 6.5)
+            }
+        }
+    }
+
+    /// Compaction lines, left to right; a line gets the `compacted` label only
+    /// when it is far enough from the last labelled one, so labels do not overlap.
+    static func labelled(_ xs: [CGFloat]) -> [(x: CGFloat, labelled: Bool)] {
+        var last = -CGFloat.infinity
+        return xs.sorted().map { x in
+            let show = x - last >= 70
+            if show { last = x }
+            return (x, show)
+        }
+    }
+
+    /// A 1 pt line over the chosen call and a ring on the top of its stack.
+    private func selectionMark(x: CGFloat, y: CGFloat, plot: CGRect) -> some View {
+        ZStack {
+            Rectangle().fill(Ink.text)
+                .frame(width: 1, height: plot.height)
+                .position(x: x + 0.5, y: plot.midY)
+            Circle().fill(Ink.bg)
+                .overlay(Circle().strokeBorder(Ink.text, lineWidth: 2))
+                .frame(width: 9, height: 9)
+                .position(x: x + 0.5, y: y)
+        }
+    }
+
+    /// `call 1 · 09:12`, the middle call and the last, spread as `justify-content: space-between`.
+    private func xLabels(_ count: Int) -> some View {
+        let calls = Array(Set([1, (count + 1) / 2, count])).sorted()
+        return HStack(spacing: 0) {
+            ForEach(Array(calls.enumerated()), id: \.element) { n, c in
+                if n > 0 { Spacer(minLength: 8) }
+                Text("call \(c) · \(lane.context[c - 1].at.formatted(date: .omitted, time: .shortened))")
+                    .lineLimit(1)
+            }
+        }
+        .font(.system(size: 11)).monospacedDigit()
+        .foregroundStyle(Ink.text3)
     }
 
     /// The calls right after a compaction.
@@ -245,59 +433,66 @@ struct ContextChart: View {
     }
 }
 
-/// The parts of one call's context, largest first, on a side panel.
+/// The parts of one call's context, top of the stack first, on a side panel.
 struct ContextBreakdown: View {
     let lane: AnatomyLane
     let point: ContextPoint
     let call: Int
 
-    /// Rows shown; the smaller parts are summed in one row.
-    static let shownParts = 10
-
     var body: some View {
-        let sorted = point.parts.sorted { $0.tokens > $1.tokens }
-        let parts = sorted.prefix(Self.shownParts)
-        let rest = sorted.dropFirst(Self.shownParts)
+        let main = lane.id == "main"
+        let sums = ContextColors.sums(point)
+        let rows = ContextColors.stack.reversed().filter { (sums[$0] ?? 0) > 0 }
         let shape = RoundedRectangle(cornerRadius: 10)
         VStack(alignment: .leading, spacing: 8) {
             Text("Call \(call) of \(lane.context.count) · \(point.at.formatted(date: .omitted, time: .standard))")
-                .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(Format.tokens(point.total)).font(.system(size: 22, weight: .semibold)).monospacedDigit()
-                Text("tokens of context").font(.system(size: 13)).foregroundStyle(.secondary)
-            }
+                .font(.system(size: 11)).monospacedDigit()
+                .foregroundStyle(Ink.text3)
+            (Text("\(Format.tokens(point.total)) ").font(.system(size: 22, weight: .semibold)).foregroundStyle(Ink.text)
+                + Text("tokens of context").font(.system(size: 13)).foregroundStyle(Ink.text2))
+                .monospacedDigit()
             VStack(alignment: .leading, spacing: 5) {
-                ForEach(parts, id: \.name) { p in
+                ForEach(rows, id: \.self) { series in
+                    let tokens = sums[series] ?? 0
                     HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 2).fill(ContextColors.color(p.name)).frame(width: 10, height: 10)
-                        Text(ContextColors.label(p.name, main: lane.id == "main")).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        Text(Format.tokens(p.tokens)).monospacedDigit()
+                        RoundedRectangle(cornerRadius: 2).fill(ContextColors.color(series: series)).frame(width: 10, height: 10)
+                        Text(ContextColors.label(series, main: main))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(Format.tokens(tokens))
+                            .lineLimit(1)
+                            .frame(width: 48, alignment: .trailing)
                     }
-                    .font(.system(size: 12))
-                    .help("\(Format.percent(point.total == 0 ? 0 : Double(p.tokens) / Double(point.total))) of this call's context")
-                }
-                if !rest.isEmpty {
-                    HStack(spacing: 8) {
-                        Color.clear.frame(width: 10, height: 10)
-                        Text("\(rest.count) smaller parts").foregroundStyle(.secondary)
-                        Spacer(minLength: 8)
-                        Text(Format.tokens(rest.reduce(0) { $0 + $1.tokens })).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: 12))
-                    .help(rest.map { "\(ContextColors.label($0.name, main: lane.id == "main")): \(Format.tokens($0.tokens))" }.joined(separator: "\n"))
+                    .font(.system(size: 12)).monospacedDigit()
+                    .help(help(series, tokens, main: main))
                 }
             }
             .padding(.top, 4)
             Text("Click or drag on the chart to choose a call.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: 11))
+                .foregroundStyle(Ink.text3)
+                .lineSpacing(2.4)
+                .padding(.vertical, 1.2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
         }
-        .padding(14)
+        // The board's aside: 14 pt padding inside a 1 pt border.
+        .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(panelBackground, in: shape)
-        .overlay(shape.stroke(Color.primary.opacity(0.1)))
+        .background(Ink.soft, in: shape)
+        .overlay(shape.strokeBorder(Ink.line, lineWidth: 1))
+    }
+
+    /// The share of the call, and the parts in a series of several (`Other tools`).
+    private func help(_ series: String, _ tokens: UInt64, main: Bool) -> String {
+        let share = Format.percent(point.total == 0 ? 0 : Double(tokens) / Double(point.total))
+        let parts = point.parts.filter { ContextColors.series($0.name) == series && $0.tokens > 0 }
+            .sorted { $0.tokens > $1.tokens }
+        var lines = ["\(share) of this call's context"]
+        if parts.count > 1 || parts.first.map({ ContextColors.label($0.name, main: main) != ContextColors.label(series, main: main) }) == true {
+            lines += parts.map { "\(ContextColors.label($0.name, main: main)): \(Format.tokens($0.tokens))" }
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -309,26 +504,31 @@ struct Contributors: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Largest additions to the context").font(.system(size: 13, weight: .semibold))
             Text("Each one stays in every later call of its lane until a compaction, so it is read again on each call.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 0) {
+                .font(.system(size: 12)).foregroundStyle(Ink.text3)
+                .fixedSize(horizontal: false, vertical: true)
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
                 ForEach(Array(anatomy.contributors.enumerated()), id: \.offset) { _, c in
                     if let lane = anatomy.lane(c.lane), lane.events.indices.contains(c.event) {
                         let e = lane.events[c.event]
-                        Divider()
+                        Rectangle().fill(Ink.line2).frame(height: 1)
                         GridRow {
                             Text("+\(Format.tokens(c.tokens))").fontWeight(.semibold)
+                                .frame(minWidth: 64, alignment: .leading)
                             HStack(spacing: 6) {
                                 RoundedRectangle(cornerRadius: 2).fill(color(e)).frame(width: 8, height: 8)
-                                Text(e.label).lineLimit(1)
+                                Text(e.label).lineLimit(1).fixedSize()
                             }
+                            .frame(minWidth: 70, alignment: .leading)
                             Text(e.command ?? e.text ?? "")
                                 .font(.system(size: 11.5, design: .monospaced))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(where_(lane, c.event))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Ink.text3)
                                 .lineLimit(1)
+                                .fixedSize()
+                                .padding(.leading, 12)
                                 .gridColumnAlignment(.trailing)
                         }
                         .padding(.vertical, 7)
@@ -345,9 +545,9 @@ struct Contributors: View {
     private func color(_ e: AnatomyEvent) -> Color {
         switch e.kind {
         case .tool: ContextColors.color("Tool: \(e.tool ?? "")")
-        case .prompt: Theme.prompt
+        case .prompt: ContextColors.prompts
         case .compact: ContextColors.summary
-        case .answer: Theme.output
+        case .answer: ContextColors.output
         case .error: Theme.bad
         }
     }
@@ -365,8 +565,9 @@ struct Contributors: View {
     }
 }
 
-/// Lays its children out in rows, wrapping to a new row when one is full.
-private struct ContextLegendFlow: Layout {
+/// Lays its children out in rows, wrapping to a new row when one is full, as
+/// `display: flex; flex-wrap: wrap; align-items: center` with a gap.
+private struct FlowRows: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
 
@@ -381,9 +582,9 @@ private struct ContextLegendFlow: Layout {
         var y = bounds.minY
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
-            for i in row.items {
-                let size = subviews[i].sizeThatFits(.unspecified)
-                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
+            for (i, size) in zip(row.items, row.sizes) {
+                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                                  proposal: ProposedViewSize(size))
                 x += size.width + spacing
             }
             y += row.height + lineSpacing
@@ -392,15 +593,23 @@ private struct ContextLegendFlow: Layout {
 
     private struct Row {
         var items: [Int] = []
+        var sizes: [CGSize] = []
         var width: CGFloat = 0
         var height: CGFloat = 0
+    }
+
+    /// An item wider than the row gets the row's width (a text then wraps).
+    private func size(_ subview: LayoutSubview, width: CGFloat) -> CGSize {
+        let ideal = subview.sizeThatFits(.unspecified)
+        guard ideal.width > width, width.isFinite else { return ideal }
+        return subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
     }
 
     private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
         var rows: [Row] = []
         var row = Row()
         for i in subviews.indices {
-            let size = subviews[i].sizeThatFits(.unspecified)
+            let size = size(subviews[i], width: width)
             let needed = row.items.isEmpty ? size.width : row.width + spacing + size.width
             if needed > width, !row.items.isEmpty {
                 rows.append(row)
@@ -409,6 +618,7 @@ private struct ContextLegendFlow: Layout {
             row.width = row.items.isEmpty ? size.width : row.width + spacing + size.width
             row.height = max(row.height, size.height)
             row.items.append(i)
+            row.sizes.append(size)
         }
         if !row.items.isEmpty { rows.append(row) }
         return rows
