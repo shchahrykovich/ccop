@@ -56,7 +56,7 @@ private enum Ink {
 }
 
 /// `48 s`, `38 min`, `5 h 19 min`.
-private func shortDuration(_ seconds: TimeInterval) -> String {
+func shortDuration(_ seconds: TimeInterval) -> String {
     if seconds < 1 { return Format.duration(seconds) }
     if seconds < 60 { return "\(Int(seconds.rounded())) s" }
     let m = Int((seconds / 60).rounded())
@@ -65,7 +65,7 @@ private func shortDuration(_ seconds: TimeInterval) -> String {
 }
 
 /// `claude-opus-5-5` → `opus 5.5`; `claude-3-5-haiku-20241022` → `haiku 3.5`.
-private func shortModel(_ model: String?) -> String? {
+func shortModel(_ model: String?) -> String? {
     guard var m = model, !m.isEmpty, m != "<synthetic>" else { return nil }
     if m.hasPrefix("claude-") { m.removeFirst(7) }
     let parts = m.split(separator: "-")
@@ -74,7 +74,7 @@ private func shortModel(_ model: String?) -> String? {
     return version.isEmpty ? String(family) : "\(family) \(version.joined(separator: "."))"
 }
 
-private func plural(_ n: Int, _ word: String) -> String {
+func plural(_ n: Int, _ word: String) -> String {
     "\(n) \(word)\(n == 1 ? "" : "s")"
 }
 
@@ -87,7 +87,7 @@ struct AnatomyView: View {
     var body: some View {
         let a = anatomy
         let scale = Self.scale(a)
-        ScrollView {
+        PageScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
                     TimelineChart(anatomy: a, scale: scale, selected: $selected)
@@ -173,10 +173,14 @@ private struct GapRange {
 /// tool calls below. Hover shows an event; a click selects it. Pinch,
 /// ⌥-scroll or the buttons zoom; a drag or a sideways scroll moves.
 struct TimelineChart: View {
+    @Environment(AppModel.self) private var model
     let anatomy: Anatomy
     let scale: TimeScale
     @Binding var selected: EventRef?
     @State private var hover: EventRef?
+    /// The lane whose label was clicked: its whole row is highlighted.
+    @State private var pickedLane: String?
+    @State private var hoverLane: String?
     /// The part of the timeline that is shown.
     @State private var window = TimeWindow()
     @State private var dragStart: TimeWindow?
@@ -207,6 +211,12 @@ struct TimelineChart: View {
         .onDisappear { wheel.stop() }
         .onChange(of: anatomy.sessionId) { window = TimeWindow() }
         .onChange(of: selected) {
+            // A call chosen elsewhere: its lane is the picked one now.
+            if let picked = pickedLane, let lane = anatomy.lane(picked), selected == startingCall(of: lane) {
+                // The label's own click: keep the subagent's row.
+            } else {
+                pickedLane = selected?.lane
+            }
             // A call chosen in the turn list: show it when it is outside the view.
             if let e = event(selected) {
                 window.reveal(scale.position(e.start))
@@ -282,6 +292,15 @@ struct TimelineChart: View {
                 tracks(lanes)
             }
             .frame(height: CGFloat(lanes.count) * Self.laneHeight)
+            .background(alignment: .topLeading) {
+                // The picked lane: a tint across the label and the tracks.
+                if let row = lanes.firstIndex(where: { $0.id == pickedLane }) {
+                    Rectangle().fill(Theme.accent.opacity(0.09))
+                        .frame(height: Self.laneHeight)
+                        .offset(y: CGFloat(row) * Self.laneHeight)
+                        .allowsHitTesting(false)
+                }
+            }
             Rectangle().fill(Ink.line2).frame(height: 1)
             HStack(spacing: 0) {
                 Text("Top: model calls · bottom: tools")
@@ -308,6 +327,7 @@ struct TimelineChart: View {
         let caption = [shortModel(lane.model), plural(calls, "call"), shortDuration(lane.duration)]
             .compactMap { $0 }.joined(separator: " · ")
         let depth = anatomy.depth(of: lane)
+        let picked = pickedLane == lane.id
         return HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 2).fill(isMain ? Ink.text : Theme.agent)
                 .frame(width: 4, height: 26)
@@ -316,15 +336,27 @@ struct TimelineChart: View {
                     .font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
                 Text(caption).font(.system(size: 11)).foregroundStyle(Ink.text3).monospacedDigit().lineLimit(1)
             }
+            if picked || hoverLane == lane.id {
+                Spacer(minLength: 0)
+                SmallIconButton(symbol: "bubble.left.and.text.bubble.right",
+                                help: isMain ? "Open the main session's chat" : "Open this agent alone in Chat",
+                                size: 24, fill: Theme.bg) {
+                    model.chatLane = lane.id
+                    model.windowTab = .chat
+                }
+            }
         }
+        .onHover { hoverLane = $0 ? lane.id : (hoverLane == lane.id ? nil : hoverLane) }
         .padding(.leading, 14 + CGFloat(max(0, depth - 1)) * 10)
         .padding(.trailing, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .help(laneHelp(lane))
         .onTapGesture {
-            // A subagent's label selects the call that started it.
+            // A subagent's label selects the call that started it; the
+            // lane's whole row is highlighted.
             if let start = startingCall(of: lane) { selected = start }
+            pickedLane = lane.id
         }
     }
 
@@ -334,7 +366,7 @@ struct TimelineChart: View {
         if !kind.isEmpty { lines.append(kind) }
         if let s = lane.startedAt { lines.append("Started \(s.formatted(date: .omitted, time: .shortened)), ran \(shortDuration(lane.duration))") }
         lines.append("\(Format.tokens(lane.usage.total)) tokens, \(lane.toolCalls) tool calls, \(lane.errors) errors")
-        if lane.id != "main" { lines.append("Click to select the call that started it.") }
+        if lane.id != "main" { lines.append("Click to highlight it and select the call that started it.") }
         return lines.joined(separator: "\n")
     }
 
@@ -867,7 +899,44 @@ private struct AnatomyLegend: View {
 // MARK: - Tools
 
 private struct ToolCards: View {
+    @Environment(AppModel.self) private var model
     let anatomy: Anatomy
+    @State private var agentList = false
+
+    static let agentTools: Set<String> = ["Agent", "Task"]
+
+    /// The subagents in tree order; a click opens one alone in Chat.
+    private var subagentList: some View {
+        let lanes = anatomy.lanesInTreeOrder.filter { $0.id != "main" }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(lanes) { lane in
+                    Button {
+                        agentList = false
+                        model.chatLane = lane.id
+                        model.windowTab = .chat
+                    } label: {
+                        HStack(spacing: 8) {
+                            RoundedRectangle(cornerRadius: 2).fill(Theme.agent).frame(width: 3, height: 14)
+                            Text(lane.name).lineLimit(1).truncationMode(.tail)
+                            Spacer(minLength: 12)
+                            Text([shortModel(lane.model), Format.dollars(lane.costMicros)].compactMap { $0 }.joined(separator: " · "))
+                                .foregroundStyle(Ink.text3).monospacedDigit()
+                        }
+                        .font(.system(size: 12.5))
+                        .padding(.leading, 8 + CGFloat(max(0, anatomy.depth(of: lane) - 1)) * 12)
+                        .padding(.trailing, 8)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(HoverRowStyle())
+                }
+            }
+            .padding(4)
+        }
+        .frame(width: 380)
+        .frame(maxHeight: 420)
+    }
 
     var body: some View {
         let added = addedTokens
@@ -880,7 +949,17 @@ private struct ToolCards: View {
             } else {
                 AutoFitGrid(minWidth: 170, spacing: 10) {
                     ForEach(anatomy.tools) { t in
-                        card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded)
+                        if Self.agentTools.contains(t.tool), anatomy.lanes.count > 1 {
+                            // A click lists the subagents; one opens alone in Chat.
+                            Button { agentList = true } label: {
+                                card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show the subagents, to open one in Chat")
+                            .popover(isPresented: $agentList, arrowEdge: .bottom) { subagentList }
+                        } else {
+                            card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded)
+                        }
                     }
                 }
                 if maxAdded > 0, let name = biggest?.tool {
@@ -1258,6 +1337,24 @@ private struct EventRow: View {
             return e.addedTokens.map { "+\(Format.tokens($0)) ctx" } ?? ""
         case .error:
             return ""
+        }
+    }
+}
+
+/// A list row that tints while the pointer is over it.
+private struct HoverRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverRow(configuration: configuration)
+    }
+
+    private struct HoverRow: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .background(hovering ? Theme.accent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .onHover { hovering = $0 }
         }
     }
 }

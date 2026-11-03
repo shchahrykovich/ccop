@@ -61,17 +61,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         image?.isTemplate = true
         let tokens = model.todayTokens
         let week = model.weekStatus
-        // With a weekly limit: "33%/87%". Today as a percent of today's
-        // allowance (the limit left, spread over the days left), colored from
-        // green to red; then the week as a percent of the weekly limit, in the
-        // menu bar's own color. Without a limit: today's tokens.
-        let planLabel = week.flatMap(Plan.menuLabel)
-        if let planLabel {
-            // The board's label: "33%/87%" on a grey plate, no icon.
-            let todayColor: NSColor? = week?.todayOfAllowance.map {
-                NSColor(hue: Plan.hue(ofAllowance: $0), saturation: 0.85, brightness: 0.85, alpha: 1)
-            }
-            button.image = Self.pill(today: planLabel.today, todayColor: todayColor, week: planLabel.week.map { "/" + $0 })
+        // With a weekly limit: a battery split by a diagonal. The left part
+        // fills with today (of today's allowance: the limit left, spread over
+        // the days left), the right part with the week (of the weekly limit).
+        // Without a limit: the icon and today's tokens.
+        if let week, let today = week.todayOfAllowance {
+            button.image = Self.battery(today: week.todayAllowanceMicros == 0 ? 1 : today, week: week.usedFraction ?? 0)
             button.attributedTitle = NSAttributedString()
             button.imagePosition = .imageOnly
         } else {
@@ -82,45 +77,68 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 ? NSAttributedString(string: " " + Format.tokens(tokens), attributes: [.font: font, .baselineOffset: 0.5])
                 : NSAttributedString()
         }
-        var tip = "ccop: \(Format.tokens(tokens)) tokens in sessions active today"
-        if let week, let part = week.todayOfAllowance, let allowance = week.todayAllowanceMicros,
-           let budget = week.budgetMicros, budget > 0, let used = week.usedFraction {
-            let todayPart: String = part.isFinite ? Format.percent(part) : "everything"
-            let allowancePart: String = Format.percent(Double(allowance) / Double(budget))
-            let lines: [String] = [
-                "ccop: today used \(todayPart) of today's allowance; the week \(Format.percent(used)) of the weekly limit",
-                "Today's allowance: \(allowancePart) of the weekly limit (what is left, spread over the days left)",
-                "This week: \(Format.percent(used)) of the limit used, \(Format.percent(week.elapsedFraction)) of the week passed",
-                "Resets \(week.weekEnd.formatted(date: .abbreviated, time: .shortened))",
-            ]
-            tip = lines.joined(separator: "\n")
+        var lines: [String]
+        if let week {
+            lines = Plan.menuTooltip(week, resets: week.weekEnd.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+        } else {
+            lines = ["ccop: \(Format.tokens(tokens)) tokens today"]
         }
-        if active > 0 { tip += "\n\(active) session\(active == 1 ? "" : "s") active now" }
-        if let error = model.error { tip += "\n\(error)" }
-        button.toolTip = tip
+        // Only when something is wrong.
+        if let error = model.error { lines.append(error) }
+        button.toolTip = lines.joined(separator: "\n")
+        button.image?.accessibilityDescription = lines.joined(separator: ". ")
     }
 
-    /// The label drawn as an image: 13 pt medium digits, padding 2 × 7, a
-    /// plate of 8% black (12% white on a dark menu bar), radius 5. The colors
-    /// are read when the image is drawn, so they follow the menu bar.
-    static func pill(today: String, todayColor: NSColor?, week: String?) -> NSImage {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        let text = NSMutableAttributedString(string: today, attributes: [.font: font])
-        if let week { text.append(NSAttributedString(string: week, attributes: [.font: font])) }
-        let textSize = text.size()
-        let size = NSSize(width: ceil(textSize.width) + 14, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
-            let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            (dark ? NSColor(white: 1, alpha: 0.12) : NSColor(white: 0, alpha: 0.08)).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+    /// A standing battery split by a slanted line: the left half is today,
+    /// the right half the week. Each half has 5 blocks that light up from the
+    /// bottom with the used part (0...1, more is full; any use lights one).
+    /// The colour goes by height: green at the bottom, red at the top. The
+    /// outline uses the menu bar's text colour, read when the image is drawn.
+    static func battery(today: Double, week: Double) -> NSImage {
+        let rows = 5
+        let image = NSImage(size: NSSize(width: 16, height: 22), flipped: false) { _ in
             let label = NSColor.labelColor
-            let drawn = NSMutableAttributedString(string: today, attributes: [.font: font, .foregroundColor: todayColor ?? label])
-            if let week { drawn.append(NSAttributedString(string: week, attributes: [.font: font, .foregroundColor: label])) }
-            drawn.draw(at: NSPoint(x: 7, y: (rect.height - textSize.height) / 2))
+            let body = NSRect(x: 1.5, y: 0.6, width: 13, height: 19)
+            let inner = body.insetBy(dx: 1.9, dy: 1.9)
+            let slant: CGFloat = 1.6, gap: CGFloat = 0.55
+            let left = NSBezierPath()
+            left.move(to: NSPoint(x: inner.minX, y: inner.minY))
+            left.line(to: NSPoint(x: inner.midX - slant - gap, y: inner.minY))
+            left.line(to: NSPoint(x: inner.midX + slant - gap, y: inner.maxY))
+            left.line(to: NSPoint(x: inner.minX, y: inner.maxY))
+            left.close()
+            let right = NSBezierPath()
+            right.move(to: NSPoint(x: inner.midX - slant + gap, y: inner.minY))
+            right.line(to: NSPoint(x: inner.maxX, y: inner.minY))
+            right.line(to: NSPoint(x: inner.maxX, y: inner.maxY))
+            right.line(to: NSPoint(x: inner.midX + slant + gap, y: inner.maxY))
+            right.close()
+            let rowGap: CGFloat = 1
+            let rowHeight = (inner.height - rowGap * CGFloat(rows - 1)) / CGFloat(rows)
+            for (half, used) in [(left, today), (right, week)] {
+                let u = used.isFinite ? max(0, used) : 1
+                let lit = u <= 0 ? 0 : max(1, min(rows, Int((u * Double(rows)).rounded())))
+                for row in 0 ..< rows {
+                    NSGraphicsContext.saveGraphicsState()
+                    half.addClip()
+                    // Green (hue 1/3) at the bottom to red (0) at the top.
+                    let hue = (1.0 / 3) * (1 - Double(row) / Double(rows - 1))
+                    (row < lit ? NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1) : label.withAlphaComponent(0.16)).setFill()
+                    NSRect(x: inner.minX, y: inner.minY + CGFloat(row) * (rowHeight + rowGap),
+                           width: inner.width, height: rowHeight).fill()
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+            }
+            label.withAlphaComponent(0.85).setStroke()
+            let outline = NSBezierPath(roundedRect: body, xRadius: 2.5, yRadius: 2.5)
+            outline.lineWidth = 1.1
+            outline.stroke()
+            label.withAlphaComponent(0.7).setFill()
+            NSBezierPath(roundedRect: NSRect(x: body.midX - 2.5, y: body.maxY + 0.3, width: 5, height: 1.7),
+                         xRadius: 0.8, yRadius: 0.8).fill()
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "ccop: today \(today), week \(week ?? "")"
         return image
     }
 

@@ -249,13 +249,14 @@ struct CopyableValue: View {
                 copied = true
                 Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 9.5))
-                    Text(copied ? "Copied" : "Copy")
-                }
+                // Only the icon: no text, no border, no plate.
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(copied ? Theme.ok : Theme.text2)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(DesignButtonStyle(kind: .bordered, height: 20, radius: 5, padding: 6, fontSize: 11))
-            .foregroundStyle(Theme.text2)
+            .buttonStyle(.plain)
             .opacity(hovering || copied ? 1 : 0)
             .help(help)
             .accessibilityLabel(help)
@@ -401,6 +402,41 @@ private struct TitleBarClicks: NSViewRepresentable {
             case .zoom: window.performZoom(nil)
             case .minimize: window.performMiniaturize(nil)
             case .nothing: break
+            }
+        }
+    }
+}
+
+/// A tab's scroll view, as in other Mac apps: ⌘↓ and End go to the end,
+/// ⌘↑ and Home to the start. The two ends are marked in overlays, so the
+/// content's own layout (such as pinned headers) stays as it is.
+struct PageScrollView<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    private enum End: Hashable { case top, bottom }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                content()
+                    .overlay(alignment: .top) { Color.clear.frame(height: 1).id(End.top) }
+                    .overlay(alignment: .bottom) { Color.clear.frame(height: 1).id(End.bottom) }
+            }
+            .background {
+                // Keys only: the buttons are not seen and take no clicks.
+                ZStack {
+                    Button("") { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(End.top, anchor: .top) } }
+                        .keyboardShortcut(.upArrow, modifiers: .command)
+                    Button("") { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(End.bottom, anchor: .bottom) } }
+                        .keyboardShortcut(.downArrow, modifiers: .command)
+                    Button("") { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(End.top, anchor: .top) } }
+                        .keyboardShortcut(.home, modifiers: [])
+                    Button("") { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(End.bottom, anchor: .bottom) } }
+                        .keyboardShortcut(.end, modifiers: [])
+                }
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
         }
     }

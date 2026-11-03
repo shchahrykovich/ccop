@@ -36,8 +36,10 @@ final class LimitsTests: XCTestCase {
         XCTAssertTrue(l.subscription)
         XCTAssertEqual(l.limits.map(\.title), ["Week · all models", "Week · Fable"])
         XCTAssertEqual(l.limits.map(\.usedPercent), [97, 0])
-        // London is on GMT in November.
-        XCTAssertEqual(l.limits.map(\.resetsAt), [d("2026-11-03T19:59:00Z"), d("2026-11-03T20:00:00Z")])
+        // London is on GMT in November. "7:59pm" is the week's last minute:
+        // it resets at 20:00. At 19:59 the week would take in the whole
+        // 19:00 hour of the old week (ccop sums costs by the hour).
+        XCTAssertEqual(l.limits.map(\.resetsAt), [d("2026-11-03T20:00:00Z"), d("2026-11-03T20:00:00Z")])
         XCTAssertEqual(l.week?.scope, "all models")
         XCTAssertEqual(l.week?.resetText, "Nov 3 at 7:59pm (Europe/London)")
     }
@@ -72,7 +74,7 @@ final class LimitsTests: XCTestCase {
         // London is on BST (UTC+1) in June.
         let text = "Current week (all models): 5% used · resets Jun 4 at 7:59pm (Europe/London)"
         let l = try XCTUnwrap(UsageLimits.parse(text, now: d("2026-06-01T10:00:00Z")))
-        XCTAssertEqual(l.week?.resetsAt, d("2026-06-04T18:59:00Z"))
+        XCTAssertEqual(l.week?.resetsAt, d("2026-06-04T19:00:00Z"))
     }
 
     func testTextWithNoLimitIsNotRead() {

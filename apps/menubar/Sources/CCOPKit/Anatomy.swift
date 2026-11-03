@@ -394,7 +394,8 @@ public struct Tip: Codable, Equatable, Sendable, Identifiable {
     public var detail: String
     public var costMicros: UInt64
     public var savingMicros: UInt64?
-    public var id: String { kind.rawValue }
+    /// The kind is not enough: Bash and Read calls give two `many_calls` tips.
+    public var id: String { kind.rawValue + "|" + title }
 }
 
 public struct ToolStat: Codable, Equatable, Sendable, Identifiable {

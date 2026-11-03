@@ -108,7 +108,7 @@ struct SessionDetailView: View {
     private var overview: some View {
         let s = session
         let a = anatomy
-        return ScrollView {
+        return PageScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                     StatCard(label: "API-equivalent cost", value: Format.dollars(s.costMicros), detail: limitShare(s), big: true)
@@ -123,6 +123,7 @@ struct SessionDetailView: View {
                     UsageBar(usage: s.usage, legend: false, height: 8)
                     UsageTable(session: s, anatomy: a, compact: false)
                 }
+                if let a, a.lanes.count > 1 { SubagentTree(anatomy: a) }
                 // Two columns of at least 300 with a gap of 28, else one.
                 let columns = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
                     : AnyLayout(VStackLayout(alignment: .leading, spacing: 22))
@@ -404,5 +405,83 @@ struct UsageTable: View {
             Circle().fill(color).frame(width: compact ? 6 : 7, height: compact ? 6 : 7)
             Text(title)
         }
+    }
+}
+
+/// The subagents as a tree: each under the agent that started it, with what
+/// it did and cost. A quick look at what the session is doing; the button
+/// opens one agent's chat.
+struct SubagentTree: View {
+    @Environment(AppModel.self) private var model
+    let anatomy: Anatomy
+    @State private var showAll = false
+
+    private static let firstRows = 12
+
+    var body: some View {
+        let lanes = anatomy.lanesInTreeOrder.filter { $0.id != "main" }
+        let shown = showAll ? lanes : Array(lanes.prefix(Self.firstRows))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Subagents").font(.ui(13, .semibold))
+                Text("\(lanes.count) · \(Format.dollars(anatomy.subagentCostMicros))")
+                    .font(.ui(11)).foregroundStyle(Theme.text3).monospacedDigit()
+            }
+            Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 0) {
+                GridRow {
+                    Text("Agent").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Model").gridColumnAlignment(.leading)
+                    Text("Start")
+                    Text("Time")
+                    Text("Tokens")
+                    Text("Tools")
+                    Text("Cost")
+                    Text("")
+                }
+                .font(.ui(11, .medium))
+                .foregroundStyle(Theme.text3)
+                .padding(.vertical, 6)
+                ForEach(shown) { lane in
+                    Rectangle().fill(Theme.line2).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                    row(lane)
+                }
+            }
+            .font(.ui(12.5))
+            if lanes.count > Self.firstRows {
+                Button(showAll ? "Show fewer" : "Show all \(lanes.count)") { showAll.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.ui(12))
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
+    private func row(_ lane: AnatomyLane) -> some View {
+        GridRow {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2).fill(Theme.agent).frame(width: 3, height: 14)
+                Text(lane.name).lineLimit(1).truncationMode(.tail)
+            }
+            .padding(.leading, CGFloat(max(0, anatomy.depth(of: lane) - 1)) * 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help([lane.name, lane.agentType].compactMap { $0 }.joined(separator: "\n"))
+            Text(shortModel(lane.model) ?? "").foregroundStyle(Theme.text2)
+            Text(lane.startedAt?.formatted(date: .omitted, time: .shortened) ?? "")
+            Text(shortDuration(lane.duration))
+            Text(Format.tokens(lane.usage.total))
+            if lane.errors > 0 {
+                (Text("\(lane.toolCalls) · ") + Text(plural(Int(lane.errors), "error")).foregroundStyle(Theme.bad))
+            } else {
+                Text("\(lane.toolCalls)")
+            }
+            Text(Format.dollars(lane.costMicros)).fontWeight(.medium)
+            SmallIconButton(symbol: "bubble.left.and.text.bubble.right", help: "Open this agent alone in Chat",
+                            size: 22, fill: Theme.bg) {
+                model.chatLane = lane.id
+                model.windowTab = .chat
+            }
+        }
+        .monospacedDigit()
+        .padding(.vertical, 5)
     }
 }

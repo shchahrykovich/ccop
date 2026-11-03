@@ -18,14 +18,22 @@ final class AppModel {
     var selectedID: String?
     var now = Date()
     var popoverOpen = false {
-        didSet { if popoverOpen, !oldValue { refresh() } }
+        didSet { if popoverOpen, !oldValue, !paused { refresh() } }
     }
     /// The main window is shown: refresh as often as with the popover open.
     var windowOpen = false {
-        didSet { if windowOpen, !oldValue { refresh() } }
+        didSet { if windowOpen, !oldValue, !paused { refresh() } }
     }
     /// The session and tab shown in the main window (apart from the popover's).
-    var windowSelectedID: String?
+    var windowSelectedID: String? {
+        didSet { if windowSelectedID != oldValue { chatLane = "main" } }
+    }
+    /// The lane the Chat tab shows: "main" or a subagent's id. Anatomy sets it
+    /// to open one agent's chat.
+    var chatLane = "main"
+    /// No automatic updates (sessions, times, limits) while the user looks at
+    /// the data; Refresh still reads once. Not saved: a new launch updates.
+    var paused = false
     var windowTab: DetailTab = .overview
     /// Day sections the user closed ("Today", "Yesterday", "Friday 30 October").
     var collapsedDays: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedDays") ?? []) {
@@ -95,7 +103,8 @@ final class AppModel {
         if autoReadLimits { readLimits() }
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                // Paused: the shown data and its "N min ago" stay as they are.
+                guard let self, !self.paused else { return }
                 self.now = Date()
                 let every: TimeInterval = self.popoverOpen || self.windowOpen ? 30 : 120
                 if Date().timeIntervalSince(self.lastLoad) >= every { self.refresh() }

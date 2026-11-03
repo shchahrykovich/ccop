@@ -214,6 +214,25 @@ public enum Plan {
         return (week.map { "\(today)/\($0)" } ?? today, today, week, status.todayAllowanceMicros == 0 || fraction > 1)
     }
 
+    /// The menu bar battery's tooltip, two short lines: today (the left
+    /// half) and the week (the right half). `resets` is the reset moment,
+    /// formatted by the caller.
+    public static func menuTooltip(_ status: WeekStatus, resets: String) -> [String] {
+        let today: String = if let allowance = status.todayAllowanceMicros, allowance > 0, let f = status.todayOfAllowance {
+            "Today \(Format.percent(f)) · \(Format.dollars(status.todayMicros)) of \(Format.dollars(allowance))"
+        } else if status.todayAllowanceMicros == 0 {
+            "Today: limit used up · \(Format.dollars(status.todayMicros))"
+        } else {
+            "Today \(Format.dollars(status.todayMicros))"
+        }
+        let week: String = if let used = status.usedFraction, let budget = status.budgetMicros {
+            "Week \(Format.percent(used)) · \(Format.dollars(status.usedMicros)) of \(Format.dollars(budget)) · resets \(resets)"
+        } else {
+            "Week \(Format.dollars(status.usedMicros)) · resets \(resets)"
+        }
+        return [today, week]
+    }
+
     /// The smallest weekly percent ccop calibrates from: /usage rounds to a
     /// whole percent, so 2% could be anything from 1.5% to 2.5%.
     public static let minCalibrationPercent: Double = 5

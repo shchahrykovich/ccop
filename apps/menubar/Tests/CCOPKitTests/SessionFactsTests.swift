@@ -10,6 +10,11 @@ final class SessionFactsTests: XCTestCase {
         XCTAssertEqual(a.subagentCostMicros, 25806)
     }
 
+    func testALanesCostIsTheSumOfItsModelCalls() throws {
+        let a = try Anatomy.decode(Data(contentsOf: AnatomyContractTests.example))
+        XCTAssertEqual(a.lanes.map(\.costMicros), [132_821, 25806])
+    }
+
     func testPromptTimesAndContextSizeComeFromTheMainLane() throws {
         let a = try Anatomy.decode(Data(contentsOf: AnatomyContractTests.example))
         XCTAssertEqual(a.promptTimes?.first, parseDate("2026-11-02T10:00:00Z"))

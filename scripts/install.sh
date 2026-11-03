@@ -27,6 +27,8 @@ done
 mkdir -p "$dest_dir"
 dest="$dest_dir/$CC_DEV_NAME.app"
 osascript -e "tell application id \"$CC_DEV_BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
+# Wait until it has quit: "open" fails (-600, -609) while it is still exiting.
+for _ in $(seq 1 25); do pgrep -f "$dest/Contents/MacOS/CCOP" >/dev/null || break; sleep 0.2; done
 old="$dest_dir/CCOP.app"
 if [[ -d "$old" ]] && codesign -dv "$old" 2>&1 | grep '^Signature=adhoc' >/dev/null; then
     osascript -e "tell application id \"$CC_BUNDLE_ID\" to quit" >/dev/null 2>&1 || true

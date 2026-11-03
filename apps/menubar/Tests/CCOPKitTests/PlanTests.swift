@@ -80,6 +80,28 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(Plan.menuLabel(s)?.over, false)
     }
 
+    func testTheMenuBarTooltipExplainsBothHalvesOfTheBattery() throws {
+        let settings = PlanSettings(resetAnchor: d("2026-10-28T00:00:00Z"), weeklyBudgetMicros: 100_000_000)
+        let report = UsageReport(generatedAt: d("2026-11-03T12:00:00Z"),
+                                 hours: hours(from: "2026-10-28T00:00:00Z", count: 83)
+                                     + hours(from: "2026-11-03T00:00:00Z", count: 5))
+        let s = try XCTUnwrap(Plan.status(settings: settings, report: report, now: d("2026-11-03T12:00:00Z"), calendar: utc))
+        // 6.5 of 7 days passed: 93%.
+        XCTAssertEqual(Plan.menuTooltip(s, resets: "Wed 00:00"), [
+            "Today 29% · $5.00 of $17.00",
+            "Week 88% · $88.00 of $100.00 · resets Wed 00:00",
+        ])
+    }
+
+    func testTheTooltipSaysWhenTheWeekIsUsedUp() throws {
+        let settings = PlanSettings(resetAnchor: d("2026-10-28T00:00:00Z"), weeklyBudgetMicros: 10_000_000)
+        let report = UsageReport(generatedAt: d("2026-11-03T12:00:00Z"),
+                                 hours: hours(from: "2026-10-28T00:00:00Z", count: 12)
+                                     + hours(from: "2026-11-03T00:00:00Z", count: 1))
+        let s = try XCTUnwrap(Plan.status(settings: settings, report: report, now: d("2026-11-03T12:00:00Z"), calendar: utc))
+        XCTAssertEqual(Plan.menuTooltip(s, resets: "x").first, "Today: limit used up · $1.00")
+    }
+
     func testWhenTheWeekIsUsedUpTodayHasNoAllowance() throws {
         let settings = PlanSettings(resetAnchor: d("2026-10-28T00:00:00Z"), weeklyBudgetMicros: 10_000_000)
         let report = UsageReport(generatedAt: d("2026-11-03T12:00:00Z"),

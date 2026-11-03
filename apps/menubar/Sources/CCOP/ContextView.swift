@@ -46,7 +46,7 @@ struct ContextView: View {
     var body: some View {
         let lanes = anatomy.lanesInTreeOrder.filter { !$0.context.isEmpty }
         let lane = anatomy.lane(laneID).flatMap { $0.context.isEmpty ? nil : $0 } ?? lanes.first
-        ScrollView {
+        PageScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header(lanes, current: lane)
                 if let lane, !lane.context.isEmpty {

@@ -60,7 +60,11 @@ struct ChatView: View {
     @Environment(AppModel.self) private var model
     let session: Session
     let anatomy: Anatomy
-    @State private var laneID = "main"
+    /// In the model, so the Anatomy tab can open one agent here.
+    private var laneID: String {
+        get { model.chatLane }
+        nonmutating set { model.chatLane = newValue }
+    }
     @State private var chat: Loadable<LaneChat> = .loading
     @State private var shownCall: CallRef?
     @State private var openTools: Set<Int> = []
@@ -70,7 +74,7 @@ struct ChatView: View {
     var body: some View {
         let lane = anatomy.lane(laneID) ?? anatomy.lanes[0]
         // A ScrollView at the root, as in the other tabs; the filter bar stays at the top.
-        ScrollView {
+        PageScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 Section {
                     switch chat {
@@ -146,7 +150,7 @@ struct ChatView: View {
     /// A chip with the lane's name and a down chevron; it opens the list of lanes.
     private func lanePicker(_ lane: AnatomyLane) -> some View {
         Menu {
-            Picker("Lane", selection: $laneID) {
+            Picker("Lane", selection: Binding(get: { model.chatLane }, set: { model.chatLane = $0 })) {
                 ForEach(anatomy.lanesInTreeOrder) { l in
                     let cost = anatomy.spend.lane(l.id).map { " · \(Format.dollars($0.costMicros))" } ?? ""
                     Text(String(repeating: "    ", count: anatomy.depth(of: l)) + l.name + cost).tag(l.id)
@@ -292,12 +296,9 @@ struct ChatView: View {
                 }
                 if thinking, startsBlock { thinkingLine(u.outputTokens) }
                 if let text = t?.text, !text.isEmpty {
-                    Self.richText(text)
-                        .font(.system(size: 13))
-                        .lineSpacing(LineHeight.answer)
+                    // An NSTextView, so a link shows the pointing hand.
+                    LinkText(text: Self.richText(text))
                         .padding(.vertical, LineHeight.answer / 2)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -305,15 +306,34 @@ struct ChatView: View {
 
     /// Claude's text with its inline Markdown: `code` in mono 12 on a light
     /// tint, as on the board; bold, italics and links as Markdown says.
-    private static func richText(_ s: String) -> Text {
+    private static func richText(_ s: String) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = LineHeight.answer
+        let base: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph,
+        ]
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)
-        guard var a = try? AttributedString(markdown: s, options: options) else { return Text(s) }
-        for run in a.runs where run.inlinePresentationIntent?.contains(.code) == true {
-            a[run.range].font = .system(size: 12, design: .monospaced)
-            a[run.range].backgroundColor = ink(0.05)
+        guard let a = try? AttributedString(markdown: s, options: options) else {
+            return NSAttributedString(string: s, attributes: base)
         }
-        return Text(a)
+        let out = NSMutableAttributedString(string: String(a.characters), attributes: base)
+        for run in a.runs {
+            let range = NSRange(run.range, in: a)
+            let intent = run.inlinePresentationIntent ?? []
+            if intent.contains(.code) {
+                out.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), range: range)
+                out.addAttribute(.backgroundColor, value: NSColor.labelColor.withAlphaComponent(0.05), range: range)
+            } else if intent.contains(.stronglyEmphasized) || intent.contains(.emphasized) {
+                var traits: NSFontDescriptor.SymbolicTraits = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.bold) }
+                if intent.contains(.emphasized) { traits.insert(.italic) }
+                let d = NSFont.systemFont(ofSize: 13).fontDescriptor.withSymbolicTraits(traits)
+                out.addAttribute(.font, value: NSFont(descriptor: d, size: 13) ?? NSFont.systemFont(ofSize: 13), range: range)
+            }
+            if let link = run.link { out.addAttribute(.link, value: link, range: range) }
+        }
+        return out
     }
 
     /// The transcript keeps no thinking text and no separate count of its tokens.
@@ -763,5 +783,43 @@ private struct SubagentCard: View {
         if seconds < 60 { return Format.duration(seconds) }
         let m = Int((seconds / 60).rounded())
         return m < 60 ? "\(m) min" : String(format: "%d h %02d min", m / 60, m % 60)
+    }
+}
+
+/// Selectable rich text in an NSTextView: links open in the browser and show
+/// the pointing hand while the pointer is over them, as in Chrome. As tall as
+/// its text at the width it is given.
+struct LinkText: NSViewRepresentable {
+    let text: NSAttributedString
+
+    func makeNSView(context: Context) -> NSTextView {
+        let view = NSTextView(usingTextLayoutManager: false)
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        view.isVerticallyResizable = false
+        view.linkTextAttributes = [
+            .foregroundColor: NSColor(Theme.accent),
+            .cursor: NSCursor.pointingHand,
+        ]
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateNSView(_ view: NSTextView, context: Context) {
+        if view.textStorage?.isEqual(to: text) != true {
+            view.textStorage?.setAttributedString(text)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0,
+              let layout = view.layoutManager, let container = view.textContainer else { return nil }
+        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height))
     }
 }

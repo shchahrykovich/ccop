@@ -12,7 +12,7 @@ struct SpendView: View {
 
     var body: some View {
         let s = anatomy.spend
-        ScrollView {
+        PageScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header(s)
                 TipList(spend: s)
@@ -300,46 +300,6 @@ private struct FlexPair: Layout {
     }
 }
 
-/// CSS `grid-template-columns: repeat(auto-fit, minmax(min, 1fr))` with `gap`: the cards of a row
-/// share the row's height.
-private struct AutoFitGrid: Layout {
-    var minimum: CGFloat
-    var gap: CGFloat
-
-    private func columns(_ width: CGFloat, _ count: Int) -> (count: Int, width: CGFloat) {
-        let n = max(1, min(count, Int((width + gap) / (minimum + gap))))
-        return (n, max(0, (width - gap * CGFloat(n - 1)) / CGFloat(n)))
-    }
-
-    private func rowHeights(_ subviews: Subviews, _ cols: (count: Int, width: CGFloat)) -> [CGFloat] {
-        stride(from: 0, to: subviews.count, by: cols.count).map { start in
-            subviews[start ..< min(start + cols.count, subviews.count)]
-                .map { $0.sizeThatFits(ProposedViewSize(width: cols.width, height: nil)).height }.max() ?? 0
-        }
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? (minimum * 3 + gap * 2)
-        let heights = rowHeights(subviews, columns(width, subviews.count))
-        return CGSize(width: width, height: heights.reduce(0, +) + gap * CGFloat(max(0, heights.count - 1)))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let cols = columns(bounds.width, subviews.count)
-        let heights = rowHeights(subviews, cols)
-        var y = bounds.minY
-        for (row, h) in heights.enumerated() {
-            for col in 0 ..< cols.count {
-                let i = row * cols.count + col
-                guard i < subviews.count else { break }
-                subviews[i].place(at: CGPoint(x: bounds.minX + CGFloat(col) * (cols.width + gap), y: y),
-                                  proposal: ProposedViewSize(width: cols.width, height: h))
-            }
-            y += h + gap
-        }
-    }
-}
-
 /// One table row of cells with set widths. `flexible` takes the width left over.
 private struct TableRow: Layout {
     var widths: [CGFloat]
@@ -389,7 +349,8 @@ struct TipList: View {
                 Text("ccop found nothing large to change in this session.")
                     .font(.system(size: 12)).foregroundStyle(SpendStyle.text2)
             } else {
-                AutoFitGrid(minimum: 240, gap: 12) {
+                // One tip per row, the full width, in the order of the list.
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(spend.tips) { TipCard(tip: $0, spend: spend) }
                 }
             }
@@ -406,15 +367,16 @@ struct TipList: View {
     }
 }
 
-/// One tip: the saving (or the cost) first, then the title and what to do.
+/// One tip as a row: the saving (or the cost) on the left, then the title
+/// and what to do.
 private struct TipCard: View {
     let tip: Tip
     let spend: Spend
 
     var body: some View {
         let saving = tip.savingMicros
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
                 if let saving {
                     Text("−\(Format.dollars(saving))")
                         .font(.system(size: 17, weight: .semibold)).foregroundStyle(SpendStyle.accent)
@@ -429,13 +391,17 @@ private struct TipCard: View {
                 }
             }
             .monospacedDigit()
-            Text(tip.title).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-            Paragraph(text: tip.detail, size: 12)
-                .textSelection(.enabled)
+            .frame(width: 120, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tip.title).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                Paragraph(text: tip.detail, size: 12)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(saving != nil ? SpendStyle.accentSoft : SpendStyle.soft, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(saving != nil ? SpendStyle.accentLine : SpendStyle.line))
     }

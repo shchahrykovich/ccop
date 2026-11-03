@@ -104,6 +104,13 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertNotEqual(groups[0].id, groups[1].id)
     }
 
+    func testTwoTipsOfOneKindHaveTheirOwnIds() throws {
+        // Bash and Read calls give two many_calls tips; with one id SwiftUI showed the first twice.
+        let json = #"[{"kind":"many_calls","title":"Bash calls made the model run","detail":"d","cost_micros":5,"saving_micros":null},{"kind":"many_calls","title":"Read calls made the model run","detail":"d","cost_micros":3,"saving_micros":null}]"#
+        let tips = try Session.makeDecoder().decode([Tip].self, from: Data(json.utf8))
+        XCTAssertNotEqual(tips[0].id, tips[1].id)
+    }
+
     func testTipsDecode() throws {
         let json = #"[{"kind":"many_calls","title":"t","detail":"d","cost_micros":5,"saving_micros":null},{"kind":"cache_rewrites","title":"t","detail":"d","cost_micros":2,"saving_micros":2}]"#
         let tips = try Session.makeDecoder().decode([Tip].self, from: Data(json.utf8))

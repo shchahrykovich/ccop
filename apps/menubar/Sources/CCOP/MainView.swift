@@ -33,6 +33,7 @@ struct SessionListView: View {
                 HStack(spacing: 4) {
                     Text("Claude Code sessions").font(.ui(13, .semibold))
                     Spacer()
+                    PauseButton()
                     RefreshButton()
                     HeaderIconButton(symbol: "macwindow", help: "Open in a window") { model.openWindow?(nil, nil) }
                 }
@@ -89,6 +90,7 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             HStack {
                 Spacer()
+                PauseButton(iconSize: 13)
                 RefreshButton(iconSize: 14)
             }
             .padding(.horizontal, 14)
@@ -162,6 +164,27 @@ private struct RefreshButton: View {
         } else {
             HeaderIconButton(symbol: "arrow.clockwise", help: "Refresh", iconSize: iconSize) { model.refresh() }
         }
+    }
+}
+
+/// Pauses and resumes the automatic updates. While paused the icon is a
+/// play symbol in the accent color.
+private struct PauseButton: View {
+    @Environment(AppModel.self) private var model
+    var iconSize: CGFloat = 14
+
+    var body: some View {
+        Button { model.paused.toggle() } label: {
+            Image(systemName: model.paused ? "play.fill" : "pause")
+                .font(.system(size: iconSize))
+                .foregroundStyle(model.paused ? Theme.accent : Theme.text2)
+                .frame(width: 28, height: 28)
+                .background(model.paused ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.paused ? "Paused: no automatic updates. Click to resume." : "Pause the automatic updates while you look at the data")
+        .accessibilityLabel(model.paused ? "Resume updates" : "Pause updates")
     }
 }
 

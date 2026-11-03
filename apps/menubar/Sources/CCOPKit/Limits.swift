@@ -121,6 +121,9 @@ public struct UsageLimits: Codable, Equatable, Sendable {
     /// `Nov 3 at 7:59pm (Europe/London)`, `8pm (Europe/London)`, `Nov 3 at 8pm`.
     /// A time with no date is the next such time; a date with no year is the
     /// nearest one that is not more than a day in the past.
+    /// /usage shows a period's last minute ("7:59pm"): the reset is the
+    /// minute after it (20:00). ccop sums costs by the hour, so a week that
+    /// starts at 19:59 would take in the old week's whole 19:00 hour.
     static func parseReset(_ text: String, now: Date) -> Date? {
         var s = text
         var zone = TimeZone.current
@@ -139,6 +142,7 @@ public struct UsageLimits: Codable, Equatable, Sendable {
             timePart = "12am"
         }
         guard let (hour, minute) = parseTime(timePart) else { return nil }
+        let next: TimeInterval = minute == 59 ? 60 : 0
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = zone
         if let datePart {
@@ -148,9 +152,10 @@ public struct UsageLimits: Codable, Equatable, Sendable {
             let dates = [year - 1, year, year + 1].compactMap {
                 cal.date(from: DateComponents(year: $0, month: month, day: day, hour: hour, minute: minute))
             }
-            return dates.filter { $0 > now.addingTimeInterval(-86400) }.min()
+            return dates.filter { $0 > now.addingTimeInterval(-86400) }.min()?.addingTimeInterval(next)
         }
-        return cal.nextDate(after: now, matching: DateComponents(hour: hour, minute: minute, second: 0), matchingPolicy: .nextTime)
+        return cal.nextDate(after: now, matching: DateComponents(hour: hour, minute: minute, second: 0), matchingPolicy: .nextTime)?
+            .addingTimeInterval(next)
     }
 
     /// `7:59pm`, `8pm`, `12am`, `19:59`.

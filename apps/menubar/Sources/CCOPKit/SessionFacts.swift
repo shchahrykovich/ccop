@@ -18,9 +18,7 @@ extension Anatomy {
 
     /// API-equivalent cost of the calls of all subagents.
     public var subagentCostMicros: UInt64 {
-        lanes.filter { $0.id != "main" }.reduce(0) { sum, lane in
-            sum + lane.events.filter { $0.kind == .answer }.compactMap(\.costMicros).reduce(0, +)
-        }
+        lanes.filter { $0.id != "main" }.reduce(0) { $0 + $1.costMicros }
     }
 
     /// When the first and the last prompt of the main lane were typed.
@@ -35,5 +33,12 @@ extension Anatomy {
         guard let points = lane("main")?.context, !points.isEmpty else { return nil }
         let sum = points.reduce(UInt64(0)) { $0 + $1.total }
         return (sum / UInt64(points.count), points.map(\.total).max() ?? 0)
+    }
+}
+
+extension AnatomyLane {
+    /// API-equivalent cost of the lane's own model calls (not its subagents').
+    public var costMicros: UInt64 {
+        events.filter { $0.kind == .answer }.compactMap(\.costMicros).reduce(0, +)
     }
 }
