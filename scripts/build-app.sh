@@ -1,41 +1,45 @@
 #!/bin/bash
 # Build CCOP.app: the Rust CLI, the Swift menu bar app, Info.plist, icon.
 #
-#   scripts/build-app.sh [--sign <identity>] [--out <dir>]
+#   scripts/build-app.sh [--sign <identity>] [--developer-id] [--out <dir>]
 #
 # Default signing is ad-hoc: it runs on this Mac; other Macs show a
-# Gatekeeper warning.
+# Gatekeeper warning, and the app does not update itself. --developer-id
+# picks the "Developer ID Application" identity from the keychain and signs
+# with the hardened runtime, as notarization requires.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MIN_MACOS="14.0"
-BUNDLE_ID="dev.ccop.app"
-
-say() { printf '==> %s\n' "$*"; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# shellcheck source=release-lib.sh
+. "$ROOT/scripts/release-lib.sh"
 
 identity="-"
 out="$ROOT/build"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --sign) identity="$2"; shift 2 ;;
+        --developer-id)
+            cc_load_signing_env "$ROOT"
+            identity="$(cc_developer_id "${APPLE_TEAM_ID:-}")"
+            [[ -n "$identity" ]] || cc_die "no Developer ID Application identity in the keychain"
+            shift ;;
         --out) out="$2"; shift 2 ;;
-        *) die "unknown option $1" ;;
+        *) cc_die "unknown option $1" ;;
     esac
 done
 
 # The version is in one place: [workspace.package] in Cargo.toml.
-version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml")"
-[[ -n "$version" ]] || die "cannot read the version from Cargo.toml"
+version="$(cc_version "$ROOT/Cargo.toml")"
+[[ -n "$version" ]] || cc_die "cannot read the version from Cargo.toml"
 APP="$out/CCOP.app"
 
-say "Building the Rust CLI $version"
+cc_say "Building the Rust CLI $version"
 (cd "$ROOT" && cargo build --release --quiet -p ccop)
 
-say "Building the Swift app"
+cc_say "Building the Swift app"
 swift build -c release --package-path "$ROOT/apps/menubar" --product CCOP >/dev/null
 swift_bin="$(swift build -c release --package-path "$ROOT/apps/menubar" --show-bin-path)/CCOP"
 
-say "Assembling $APP"
+cc_say "Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
 cp "$swift_bin" "$APP/Contents/MacOS/CCOP"
@@ -43,16 +47,16 @@ cp "$swift_bin" "$APP/Contents/MacOS/CCOP"
 # case-insensitive file system, so it cannot sit next to the app in MacOS.
 cp "$ROOT/target/release/ccop" "$APP/Contents/Helpers/ccop"
 for program in MacOS/CCOP Helpers/ccop; do
-    [[ -x "$APP/Contents/$program" ]] || die "missing $program in the bundle"
+    [[ -x "$APP/Contents/$program" ]] || cc_die "missing $program in the bundle"
 done
-cmp -s "$swift_bin" "$APP/Contents/MacOS/CCOP" || die "Contents/MacOS/CCOP is not the Swift app"
-sed -e "s|@VERSION@|$version|g" -e "s|@BUNDLE_ID@|$BUNDLE_ID|g" -e "s|@MIN_MACOS@|$MIN_MACOS|g" \
+cmp -s "$swift_bin" "$APP/Contents/MacOS/CCOP" || cc_die "Contents/MacOS/CCOP is not the Swift app"
+sed -e "s|@VERSION@|$version|g" -e "s|@BUNDLE_ID@|$CC_BUNDLE_ID|g" -e "s|@MIN_MACOS@|$CC_MIN_MACOS|g" \
     "$ROOT/scripts/Info.plist.in" > "$APP/Contents/Info.plist"
 plutil -lint -s "$APP/Contents/Info.plist"
 
 icon_cache="$ROOT/build/AppIcon.icns"
 if [[ ! -f "$icon_cache" || "$ROOT/scripts/make-icon.swift" -nt "$icon_cache" ]]; then
-    say "Drawing the icon"
+    cc_say "Drawing the icon"
     tmp="$(mktemp -d)"
     swift "$ROOT/scripts/make-icon.swift" "$tmp/icon.png"
     mkdir "$tmp/AppIcon.iconset"
@@ -66,14 +70,14 @@ if [[ ! -f "$icon_cache" || "$ROOT/scripts/make-icon.swift" -nt "$icon_cache" ]]
 fi
 cp "$icon_cache" "$APP/Contents/Resources/AppIcon.icns"
 
-say "Signing ($([[ "$identity" == "-" ]] && echo ad-hoc || echo "$identity"))"
+cc_say "Signing ($([[ "$identity" == "-" ]] && echo ad-hoc || echo "Developer ID"))"
 if [[ "$identity" == "-" ]]; then
     flags=(--force --sign - --timestamp=none)
 else
     flags=(--force --options runtime --timestamp --sign "$identity")
 fi
 # Nested programs first, then the bundle.
-codesign "${flags[@]}" --identifier "$BUNDLE_ID.cli" "$APP/Contents/Helpers/ccop"
+codesign "${flags[@]}" --identifier "$CC_BUNDLE_ID.cli" "$APP/Contents/Helpers/ccop"
 codesign "${flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
-say "Built $APP ($version)"
+cc_say "Built $APP ($version)"

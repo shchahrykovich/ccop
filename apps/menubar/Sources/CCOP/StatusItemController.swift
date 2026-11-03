@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 
 /// The menu bar icon. A left click toggles the popover with the sessions; a
-/// right click shows Refresh and Quit. NSStatusItem + NSPopover instead of
+/// right click shows the menu (window, plan, refresh, updates, quit). NSStatusItem + NSPopover instead of
 /// SwiftUI's MenuBarExtra, so the popover can be opened
 /// from code.
 @MainActor
@@ -141,6 +141,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     private func showMenu() {
         let menu = NSMenu()
+        if case let .available(release) = model.update {
+            let install = NSMenuItem(title: "Install ccop \(release.version)…", action: #selector(installClicked), keyEquivalent: "")
+            install.target = self
+            menu.addItem(install)
+            menu.addItem(.separator())
+        }
         let open = NSMenuItem(title: "Open Window", action: #selector(openWindowClicked), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
@@ -150,6 +156,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshClicked), keyEquivalent: "r")
         refresh.target = self
         menu.addItem(refresh)
+        menu.addItem(.separator())
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(checkClicked), keyEquivalent: "")
+        check.target = self
+        menu.addItem(check)
+        let auto = NSMenuItem(title: "Check for Updates Automatically", action: #selector(autoClicked), keyEquivalent: "")
+        auto.target = self
+        auto.state = model.autoUpdate ? .on : .off
+        menu.addItem(auto)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit ccop", action: #selector(quitClicked), keyEquivalent: "q")
         quit.target = self
@@ -163,4 +177,49 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     @objc private func planClicked() { model.openPlanSettings?() }
     @objc private func openWindowClicked() { openWindow(session: nil, tab: nil) }
     @objc private func quitClicked() { NSApp.terminate(nil) }
+    @objc private func autoClicked() { model.autoUpdate.toggle() }
+
+    @objc private func checkClicked() {
+        Task { @MainActor in
+            await model.checkForUpdates(manual: true)
+            switch model.update {
+            case let .available(release): offer(release)
+            case .upToDate:
+                alert("ccop is up to date", "You have version \(model.version), the newest.")
+                model.dismissUpdateMessage()
+            case let .failed(why):
+                alert("Could not check for updates", why, warning: true)
+                model.dismissUpdateMessage()
+            case .idle, .checking, .downloading: break
+            }
+        }
+    }
+
+    @objc private func installClicked() {
+        if case let .available(release) = model.update { offer(release) }
+    }
+
+    /// Asks before installing. On success the app quits; it is still here only on failure.
+    private func offer(_ release: Updater.Release) {
+        let notes = release.notes.isEmpty ? "" : "\n\n\(release.notes)"
+        let answer = alert("ccop \(release.version) is available",
+                           "You have version \(model.version). Install it now? ccop quits and opens again.\(notes)",
+                           buttons: ["Install", "Later"])
+        guard answer == .alertFirstButtonReturn else { return }
+        Task { @MainActor in
+            await model.installUpdate(release)
+            if case let .failed(why) = model.update { alert("Could not install the update", why, warning: true) }
+        }
+    }
+
+    @discardableResult
+    private func alert(_ title: String, _ detail: String, warning: Bool = false, buttons: [String] = []) -> NSApplication.ModalResponse {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.alertStyle = warning ? .warning : .informational
+        for title in buttons { alert.addButton(withTitle: title) }
+        return alert.runModal()
+    }
 }

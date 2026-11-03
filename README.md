@@ -2,7 +2,7 @@
 
 ccop is a macOS menu bar app. It shows all Claude Code sessions on your Mac and how many tokens each one used. The goal is to help you see where tokens go, so you can use fewer of them.
 
-It reads the transcript files that Claude Code already writes to `~/.claude/projects/`. It sends nothing over the network.
+It reads the transcript files that Claude Code already writes to `~/.claude/projects/`. Your sessions never leave your Mac. The only network request is the update check to GitHub (see [Updates](#updates)).
 
 ## What it shows
 
@@ -26,15 +26,31 @@ Costs are "API-equivalent": what the same calls would cost at Anthropic API pric
 
 ## Install
 
-Build the app and install it to `~/Applications`, then open it:
+Download `ccop-<version>.dmg` from [Releases](https://github.com/shchahrykovich/ccop/releases/latest), open it, and drag CCOP to Applications. The release is signed with a Developer ID and notarized by Apple.
+
+Or build it from source and install it to `~/Applications`, then open it:
 
 ```
 scripts/install.sh --user --launch
 ```
 
-Without `--user` it installs to `/Applications`. The app is ad-hoc signed.
+Without `--user` it installs to `/Applications`. A build from source is ad-hoc signed: it runs on your Mac, but it does not update itself.
 
-The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for Refresh and Quit.
+The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for the window, plan settings, Refresh, updates and Quit.
+
+## Updates
+
+A release copy checks GitHub for a new version 30 seconds after it starts, then every 6 hours. When there is one, the popover shows "ccop X.Y.Z is available" with an Install button, and the right-click menu shows "Install ccop X.Y.Z…". Nothing is downloaded until you click Install.
+
+What Install does:
+
+1. Downloads the DMG from the GitHub release (https only, GitHub hosts only).
+2. Checks the DMG with Gatekeeper: it must be signed with a Developer ID and notarized.
+3. Quits ccop. A small script then checks that the new app has the same Team ID as the old one, replaces the app, and opens it. If a check fails, the old app stays and opens again.
+
+The script writes a log to `~/Library/Logs/ccop/`. The app only replaces a copy in `/Applications` or `~/Applications`.
+
+To turn off the automatic check, right-click the menu bar item and clear "Check for Updates Automatically". "Check for Updates…" checks at once.
 
 ## Command line
 
@@ -82,6 +98,18 @@ scripts/build-app.sh            # builds build/CCOP.app
 ```
 
 `CLAUDE.md` has more detail on the architecture and the transcript format.
+
+## Releases
+
+A release needs a "Developer ID Application" certificate in the keychain and notary credentials. Copy `scripts/notarize.env.example` to `.env.notarize` and fill it in. Git ignores that file.
+
+```
+scripts/build-app.sh --developer-id     # build/CCOP.app signed with Developer ID and the hardened runtime
+scripts/release.sh --notarize           # bump the patch version, build, make dist/ccop-<version>.dmg, notarize
+scripts/publish.sh                      # all of the above, then a GitHub release with the DMG
+```
+
+`publish.sh` takes `--patch` (the default), `--minor`, `--major`, `--set X.Y.Z` or `--no-bump`. Commit and push the new version in `Cargo.toml` after a release.
 
 ## License
 

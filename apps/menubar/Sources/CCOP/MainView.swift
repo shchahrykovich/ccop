@@ -66,6 +66,7 @@ struct SessionListView: View {
                         .foregroundStyle(.orange)
                         .textSelection(.enabled)
                 }
+                UpdateBanner()
             }
             .padding(12)
             Divider()
@@ -94,6 +95,47 @@ struct SessionListView: View {
                 }
                 .listStyle(.plain)
             }
+        }
+    }
+}
+
+/// A new version, or its download. Other update results show as alerts
+/// from the menu's Check for Updates….
+struct UpdateBanner: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        switch model.update {
+        case let .available(release):
+            HStack {
+                Label("ccop \(release.version) is available", systemImage: "arrow.down.circle.fill")
+                Spacer()
+                Button("Install") { Task { await model.installUpdate(release) } }
+                    .controlSize(.small)
+                    .help("Download \(release.version), quit, and open the new version")
+                Button { model.dismissUpdateMessage() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .help("Hide until the next check")
+            }
+            .font(.callout)
+        case let .downloading(release):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Downloading ccop \(release.version)…")
+            }
+            .font(.callout)
+        case let .failed(why):
+            HStack(alignment: .top) {
+                Label("Could not update: \(why)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                Spacer()
+                Button { model.dismissUpdateMessage() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+            }
+            .font(.caption)
+        case .idle, .checking, .upToDate:
+            EmptyView()
         }
     }
 }

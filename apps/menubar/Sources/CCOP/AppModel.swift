@@ -48,11 +48,37 @@ final class AppModel {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var lastLoad = Date.distantPast
 
+    enum UpdateState: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(Updater.Release)
+        case downloading(Updater.Release)
+        case failed(String)
+    }
+
+    private(set) var update: UpdateState = .idle
+    /// Check GitHub for a new version every 6 hours (on by default).
+    var autoUpdate = UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoUpdate, forKey: "autoUpdate") }
+    }
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    /// The Team ID this app is signed with; nil for a local (ad-hoc) build.
+    @ObservationIgnored private let teamID = Updater.teamIdentifier(of: Bundle.main.bundleURL)
+    @ObservationIgnored private var updateTask: Task<Void, Never>?
+
     init(source: SessionSource? = CLISessionSource.locate().map { CLISessionSource(cli: $0) }) {
         self.source = source
     }
 
     func start() {
+        updateTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            while !Task.isCancelled {
+                if self?.autoUpdate == true { await self?.checkForUpdates(manual: false) }
+                try? await Task.sleep(for: .seconds(6 * 3600))
+            }
+        }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -165,6 +191,56 @@ final class AppModel {
         plan.weeklyBudgetMicros = budget
         plan.calibratedAt = Date()
         return true
+    }
+
+    // MARK: Updates
+
+    /// A manual check reports every result; an automatic one only an update.
+    func checkForUpdates(manual: Bool) async {
+        if case .downloading = update { return }
+        if let reason = Updater.disabledReason(teamID: teamID) {
+            update = manual ? .failed(reason) : .idle
+            return
+        }
+        update = .checking
+        do {
+            let release = try await Updater.latest(currentVersion: version)
+            if Updater.isNewer(release.version, than: version) {
+                update = .available(release)
+            } else {
+                update = manual ? .upToDate : .idle
+            }
+        } catch {
+            update = manual ? .failed(error.localizedDescription) : .idle
+        }
+    }
+
+    /// Downloads the release, checks it with Gatekeeper, starts the install
+    /// script and quits. The script opens the new version.
+    func installUpdate(_ release: Updater.Release) async {
+        guard let teamID, Updater.disabledReason(teamID: teamID) == nil else {
+            update = .failed(Updater.disabledReason(teamID: teamID) ?? "No Team ID.")
+            return
+        }
+        if let obstacle = Updater.obstacle(appURL: Bundle.main.bundleURL) {
+            update = .failed(obstacle)
+            return
+        }
+        update = .downloading(release)
+        do {
+            let dmg = try await Updater.download(release)
+            try await Task.detached { try Updater.checkImage(dmg) }.value
+            try Updater.startInstall(dmg: dmg, app: Bundle.main.bundleURL, team: teamID)
+            try? await Task.sleep(for: .milliseconds(600))
+            NSApp.terminate(nil)
+        } catch {
+            update = .failed(error.localizedDescription)
+        }
+    }
+
+    func dismissUpdateMessage() {
+        if case .downloading = update { return }
+        update = .idle
     }
 
     // MARK: Actions
