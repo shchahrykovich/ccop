@@ -66,7 +66,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // the days left), the right part with the week (of the weekly limit).
         // Without a limit: the icon and today's tokens.
         if let week, let today = week.todayOfAllowance {
-            button.image = Self.battery(today: week.todayAllowanceMicros == 0 ? 1 : today, week: week.usedFraction ?? 0)
+            button.image = Self.battery(today: week.todayAllowanceMicros == 0 ? 1 : today, week: week.usedFraction ?? 0,
+                                        dark: model.isLocalBuild)
             button.attributedTitle = NSAttributedString()
             button.imagePosition = .imageOnly
         } else {
@@ -89,18 +90,27 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         button.image?.accessibilityDescription = lines.joined(separator: ". ")
     }
 
-    /// A standing battery split by a slanted line: the left half is today,
+    /// A standing battery split by a diagonal line: the left half is today,
     /// the right half the week. Each half has 5 blocks that light up from the
     /// bottom with the used part (0...1, more is full; any use lights one).
     /// The colour goes by height: green at the bottom, red at the top. The
     /// outline uses the menu bar's text colour, read when the image is drawn.
-    static func battery(today: Double, week: Double) -> NSImage {
+    /// `dark`: a near-black body, for a local build, so it can be told from
+    /// the release when both run.
+    static func battery(today: Double, week: Double, dark: Bool = false) -> NSImage {
         let rows = 5
         let image = NSImage(size: NSSize(width: 16, height: 22), flipped: false) { _ in
             let label = NSColor.labelColor
             let body = NSRect(x: 1.5, y: 0.6, width: 13, height: 19)
+            if dark {
+                NSColor(white: 0.09, alpha: 1).setFill()
+                NSBezierPath(roundedRect: body, xRadius: 2.5, yRadius: 2.5).fill()
+            }
+            // An unlit block; on the dark body it must not follow a black menu bar text.
+            let unlit = dark ? NSColor(white: 1, alpha: 0.2) : label.withAlphaComponent(0.16)
             let inner = body.insetBy(dx: 1.9, dy: 1.9)
-            let slant: CGFloat = 1.6, gap: CGFloat = 0.55
+            // Half the width of the gap between the halves; the line sits in it.
+            let slant: CGFloat = 1.9, gap: CGFloat = 0.85
             let left = NSBezierPath()
             left.move(to: NSPoint(x: inner.minX, y: inner.minY))
             left.line(to: NSPoint(x: inner.midX - slant - gap, y: inner.minY))
@@ -123,12 +133,21 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                     half.addClip()
                     // Green (hue 1/3) at the bottom to red (0) at the top.
                     let hue = (1.0 / 3) * (1 - Double(row) / Double(rows - 1))
-                    (row < lit ? NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1) : label.withAlphaComponent(0.16)).setFill()
+                    (row < lit ? NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1) : unlit).setFill()
                     NSRect(x: inner.minX, y: inner.minY + CGFloat(row) * (rowHeight + rowGap),
                            width: inner.width, height: rowHeight).fill()
                     NSGraphicsContext.restoreGraphicsState()
                 }
             }
+            // The diagonal, from the bottom of the body to the top. On the dark
+            // body it must stay light even when the menu bar text is black.
+            (dark ? NSColor(white: 1, alpha: 0.95) : label.withAlphaComponent(0.85)).setStroke()
+            let run = slant * body.height / inner.height
+            let diagonal = NSBezierPath()
+            diagonal.move(to: NSPoint(x: body.midX - run, y: body.minY))
+            diagonal.line(to: NSPoint(x: body.midX + run, y: body.maxY))
+            diagonal.lineWidth = 1.1
+            diagonal.stroke()
             label.withAlphaComponent(0.85).setStroke()
             let outline = NSBezierPath(roundedRect: body, xRadius: 2.5, yRadius: 2.5)
             outline.lineWidth = 1.1

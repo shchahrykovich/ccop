@@ -12,9 +12,15 @@ final class AppModel {
     private(set) var error: String?
     private(set) var loadedAt: Date?
     var query = ""
-    var period: Period = .week
+    /// Saved on each change, so a new launch shows the same period.
+    var period = Period.load() {
+        didSet { period.save() }
+    }
     /// The project folder the list shows (alone or with its subfolders); nil for all folders.
-    var folder: FolderScope?
+    /// Saved on each change, so a new launch shows the same folder.
+    var folder = FolderScope.load() {
+        didSet { FolderScope.save(folder) }
+    }
     var selectedID: String?
     var now = Date()
     var popoverOpen = false {
@@ -85,6 +91,8 @@ final class AppModel {
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     /// The Team ID this app is signed with; nil for a local (ad-hoc) build.
     @ObservationIgnored private let teamID = Updater.teamIdentifier(of: Bundle.main.bundleURL)
+    /// A local build ("CCOP Dev"): its menu bar battery is dark, so it is not taken for the release.
+    var isLocalBuild: Bool { Updater.isLocalBuild(teamID: teamID) }
     @ObservationIgnored private var updateTask: Task<Void, Never>?
 
     init(source: SessionSource? = CLISessionSource.locate().map { CLISessionSource(cli: $0) }) {
@@ -239,6 +247,12 @@ final class AppModel {
     /// This week against the weekly limit; nil before a reset time is set.
     var weekStatus: WeekStatus? {
         usageReport.flatMap { Plan.status(settings: plan, report: $0, now: now) }
+    }
+
+    /// This week against the week before; nil before a reset time is set.
+    var weekComparison: (status: WeekStatus, comparison: WeekComparison)? {
+        guard let status = weekStatus, let usageReport else { return nil }
+        return (status, Plan.comparison(status, report: usageReport, now: now))
     }
 
     /// Sets the weekly limit from the percent /usage shows now. Returns false

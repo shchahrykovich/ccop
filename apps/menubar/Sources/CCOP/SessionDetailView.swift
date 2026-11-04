@@ -10,6 +10,7 @@ struct SessionDetailView: View {
     /// In the main window: no back button, the window has tabs.
     let inWindow: Bool
     @State private var wide = true
+    @State private var fourCards = true
 
     var body: some View {
         Group {
@@ -110,14 +111,18 @@ struct SessionDetailView: View {
         let a = anatomy
         return PageScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                // Four cards in a row fill a wide page; narrower, they wrap at 180 each.
+                LazyVGrid(columns: fourCards ? Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
+                    : [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                     StatCard(label: "API-equivalent cost", value: Format.dollars(s.costMicros), detail: limitShare(s), big: true)
+                        .help(limitShare(s) == nil ? "" : Plan.limitShareHelp)
                     StatCard(label: "Tokens", value: Format.tokens(s.usage.total),
                              detail: "\(Format.percent(s.usage.cacheHitRatio)) of input from cache", big: true)
                     StatCard(label: "Model calls", value: "\(s.usage.requests)", detail: callsLine(s), big: true)
                     StatCard(label: "Average context", value: a?.contextSize.map { Format.tokens($0.average) } ?? "–",
                              detail: a.flatMap(contextLine), big: true)
                 }
+                .onGeometryChange(for: Bool.self) { $0.size.width >= 4 * 180 + 3 * 12 } action: { fourCards = $0 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Tokens by kind").font(.ui(13, .semibold))
                     UsageBar(usage: s.usage, legend: false, height: 8)
@@ -146,7 +151,6 @@ struct SessionDetailView: View {
                 .padding(.top, 4)
             }
             .padding(24)
-            .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -256,8 +260,7 @@ struct SessionDetailView: View {
     }
 
     private func limitShare(_ s: Session) -> String? {
-        guard let b = model.plan.weeklyBudgetMicros, b > 0 else { return nil }
-        return "\(Format.percent(Double(s.costMicros) / Double(b))) of your weekly limit"
+        Plan.limitShare(costMicros: s.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros)
     }
 }
 
@@ -418,14 +421,22 @@ struct SubagentTree: View {
 
     private static let firstRows = 12
 
+    /// The columns Day limit and Week limit show only with a limit.
+    private var hasLimit: Bool {
+        Plan.limitParts(costMicros: 0, weeklyBudgetMicros: model.plan.weeklyBudgetMicros) != nil
+    }
+
     var body: some View {
         let lanes = anatomy.lanesInTreeOrder.filter { $0.id != "main" }
         let shown = showAll ? lanes : Array(lanes.prefix(Self.firstRows))
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Subagents").font(.ui(13, .semibold))
-                Text("\(lanes.count) · \(Format.dollars(anatomy.subagentCostMicros))")
+                Text(([String(lanes.count), Format.dollars(anatomy.subagentCostMicros)]
+                        + [Plan.limitShare(costMicros: anatomy.subagentCostMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros)].compactMap { $0 })
+                        .joined(separator: " · "))
                     .font(.ui(11)).foregroundStyle(Theme.text3).monospacedDigit()
+                    .help(Plan.limitShareHelp)
             }
             Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 0) {
                 GridRow {
@@ -436,6 +447,10 @@ struct SubagentTree: View {
                     Text("Tokens")
                     Text("Tools")
                     Text("Cost")
+                    if hasLimit {
+                        Text("Day limit").help(Plan.limitShareHelp)
+                        Text("Week limit").help(Plan.limitShareHelp)
+                    }
                     Text("")
                 }
                 .font(.ui(11, .medium))
@@ -475,6 +490,10 @@ struct SubagentTree: View {
                 Text("\(lane.toolCalls)")
             }
             Text(Format.dollars(lane.costMicros)).fontWeight(.medium)
+            if let parts = Plan.limitParts(costMicros: lane.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros) {
+                Text(parts.day).foregroundStyle(Theme.text2)
+                Text(parts.week).foregroundStyle(Theme.text2)
+            }
             SmallIconButton(symbol: "bubble.left.and.text.bubble.right", help: "Open this agent alone in Chat",
                             size: 22, fill: Theme.bg) {
                 model.chatLane = lane.id

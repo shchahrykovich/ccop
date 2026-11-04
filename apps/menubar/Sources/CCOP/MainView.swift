@@ -38,11 +38,11 @@ struct SessionListView: View {
                     HeaderIconButton(symbol: "macwindow", help: "Open in a window") { model.openWindow?(nil, nil) }
                 }
                 PlanCards()
+                WeekCompareCard()
                 Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)
                     .accessibilityLabel("Period")
-                HStack(spacing: 8) {
+                SearchField(placeholder: "Search title, prompt, branch or id", text: $model.query, iconSize: 12) {
                     FolderPicker()
-                    SearchField(placeholder: "Search title, prompt, branch or id", text: $model.query)
                 }
                 TotalsView(sessions: visible)
                 StatusMessages()
@@ -101,7 +101,7 @@ struct SidebarView: View {
                 Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)
                     .accessibilityLabel("Period")
                 SearchField(placeholder: "Search", text: $model.query, iconSize: 12) {
-                    FolderPicker(inField: true)
+                    FolderPicker()
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     let u = SessionList.total(visible)

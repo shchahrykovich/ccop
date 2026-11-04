@@ -53,6 +53,12 @@ final class UpdaterTests: XCTestCase {
         XCTAssertNil(Updater.disabledReason(teamID: "ABCDE12345"), "Developer ID release")
     }
 
+    func testABuildWithoutATeamIDIsALocalBuild() {
+        XCTAssertTrue(Updater.isLocalBuild(teamID: nil), "ad-hoc or unsigned")
+        XCTAssertTrue(Updater.isLocalBuild(teamID: ""))
+        XCTAssertFalse(Updater.isLocalBuild(teamID: "ABCDE12345"), "Developer ID release")
+    }
+
     func testOnlyACopyInAnApplicationsFolderIsReplaced() {
         let home = URL(fileURLWithPath: "/Users/someone")
         XCTAssertNotNil(Updater.obstacle(appURL: URL(fileURLWithPath: "/tmp/build/CCOP"), home: home))

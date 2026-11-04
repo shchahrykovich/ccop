@@ -149,6 +149,135 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(none.tier, .max20x)
     }
 
+    func testThisWeekIsComparedWithTheWeekBefore() throws {
+        let settings = PlanSettings(tier: .max5x, resetAnchor: d("2026-10-29T10:00:00Z"), weeklyBudgetMicros: 70_000_000)
+        // Last week: $2 on its first day, $3 on its last day. This week: $4 so far.
+        let report = UsageReport(generatedAt: d("2026-11-02T20:00:00Z"),
+                                 hours: hours(from: "2026-10-22T10:00:00Z", count: 2)
+                                     + hours(from: "2026-10-29T07:00:00Z", count: 3)
+                                     + hours(from: "2026-10-29T10:00:00Z", count: 1)
+                                     + hours(from: "2026-11-02T10:00:00Z", count: 3))
+        let now = d("2026-11-02T13:30:00Z")
+        let status = try XCTUnwrap(Plan.status(settings: settings, report: report, now: now, calendar: utc))
+        let c = Plan.comparison(status, report: report, now: now)
+        // Both start at 0, at the reset.
+        XCTAssertEqual(c.current.first, WeekComparison.Point(hour: 0, micros: 0))
+        XCTAssertEqual(c.previous.first, WeekComparison.Point(hour: 0, micros: 0))
+        // The running total of this week is what the week card shows.
+        XCTAssertEqual(c.currentTotal, status.usedMicros)
+        XCTAssertEqual(c.currentTotal, 4_000_000)
+        XCTAssertEqual(c.previousTotal, 5_000_000)
+        XCTAssertEqual(c.peak, 5_000_000)
+        XCTAssertEqual(c.budgetMicros, 70_000_000)
+        // The last week's line has all 7 days; this week's stops at now, 99.5 h in.
+        XCTAssertEqual(c.previous.last?.hour, 168)
+        XCTAssertEqual(c.current.last?.hour, 99.5)
+        // At this point of the last week only its first $2 were used.
+        XCTAssertEqual(c.previousByNow, 2_000_000)
+        // A running total never goes down.
+        XCTAssertEqual(c.previous.map(\.micros), c.previous.map(\.micros).sorted())
+    }
+
+    func testAComparisonRightAfterAResetHasAPointAtNow() throws {
+        let settings = PlanSettings(tier: .max5x, resetAnchor: d("2026-10-29T10:00:00Z"), weeklyBudgetMicros: 70_000_000)
+        let report = UsageReport(generatedAt: d("2026-10-29T10:10:00Z"), hours: hours(from: "2026-10-29T10:00:00Z", count: 1))
+        let now = d("2026-10-29T10:10:00Z")
+        let status = try XCTUnwrap(Plan.status(settings: settings, report: report, now: now, calendar: utc))
+        let c = Plan.comparison(status, report: report, now: now)
+        XCTAssertEqual(c.current.count, 2)
+        XCTAssertEqual(c.current.last?.hour ?? 0, 1.0 / 6, accuracy: 1e-9)
+        XCTAssertEqual(c.currentTotal, 1_000_000)
+        XCTAssertEqual(c.previousTotal, 0)
+        XCTAssertEqual(c.previousByNow, 0)
+    }
+
+    func testTheSoFarGraphStopsTheLastWeekAtNow() throws {
+        let settings = PlanSettings(tier: .max5x, resetAnchor: d("2026-10-29T10:00:00Z"), weeklyBudgetMicros: 70_000_000)
+        // Last week: $2 in its first hours, $3 at its end. This week: $1.
+        let report = UsageReport(generatedAt: d("2026-10-29T13:30:00Z"),
+                                 hours: hours(from: "2026-10-22T10:00:00Z", count: 2)
+                                     + hours(from: "2026-10-29T07:00:00Z", count: 3)
+                                     + hours(from: "2026-10-29T12:00:00Z", count: 1))
+        let now = d("2026-10-29T13:30:00Z")
+        let status = try XCTUnwrap(Plan.status(settings: settings, report: report, now: now, calendar: utc))
+        let whole = Plan.comparison(status, report: report, now: now)
+        let soFar = whole.soFar
+        // This week does not change; the last week ends where this week is.
+        XCTAssertEqual(soFar.current, whole.current)
+        XCTAssertEqual(soFar.previous.last, WeekComparison.Point(hour: 3.5, micros: 2_000_000))
+        XCTAssertEqual(soFar.previousTotal, whole.previousByNow)
+        // The peak is only what the shorter graph shows, not the $5 of the whole last week.
+        XCTAssertEqual(whole.peak, 5_000_000)
+        XCTAssertEqual(soFar.peak, 2_000_000)
+    }
+
+    func testAnAxisTopIsARoundNumberAtOrAboveTheValue() {
+        XCTAssertEqual(Plan.axisTop(1.14), 1.2, accuracy: 1e-9)
+        XCTAssertEqual(Plan.axisTop(0.07), 0.08, accuracy: 1e-9)
+        XCTAssertEqual(Plan.axisTop(0.005), 0.005, accuracy: 1e-9)
+        XCTAssertEqual(Plan.axisTop(1), 1, accuracy: 1e-9)
+        XCTAssertEqual(Plan.axisTop(95), 100, accuracy: 1e-9)
+        // Nothing used yet.
+        XCTAssertEqual(Plan.axisTop(0), 1)
+    }
+
+    func testAxisTicksAreMidnightsForLongRangesAndRoundHoursForShortOnes() {
+        let start = d("2026-11-03T20:00:00Z")
+        let week = Plan.axisTicks(from: start, hours: 168, calendar: utc)
+        XCTAssertTrue(week.byDay)
+        // 4 h to the first midnight, then one a day; none at the end of the week.
+        XCTAssertEqual(week.hours, [4, 28, 52, 76, 100, 124, 148])
+
+        let short = Plan.axisTicks(from: start, hours: 5.5, calendar: utc)
+        XCTAssertFalse(short.byDay)
+        XCTAssertEqual(short.hours, [1, 2, 3, 4, 5])
+
+        // 22:00, 00:00, 02:00, 04:00; from a start that is not on the hour.
+        let half = d("2026-11-03T20:30:00Z")
+        XCTAssertEqual(Plan.axisTicks(from: half, hours: 10, calendar: utc).hours, [1.5, 3.5, 5.5, 7.5, 9.5])
+
+        // A day: 6 hours apart, on the clock's 0, 6, 12 and 18.
+        XCTAssertEqual(Plan.axisTicks(from: start, hours: 24, calendar: utc).hours, [4, 10, 16, 22])
+    }
+
+    func testACostIsShownAsAPartOfTheDayAndWeekLimits() {
+        // The limit is $70 a week, so a day is $10.
+        XCTAssertEqual(Plan.limitShare(costMicros: 2_800_000, weeklyBudgetMicros: 70_000_000), "28% of day · 4.0% of week limit")
+        // More than a day's limit: the percent goes over 100.
+        XCTAssertEqual(Plan.limitShare(costMicros: 25_000_000, weeklyBudgetMicros: 70_000_000), "250% of day · 36% of week limit")
+        // A small cost does not show as 0%: $0.41 of $2,100 a week.
+        XCTAssertEqual(Plan.limitShare(costMicros: 410_000, weeklyBudgetMicros: 2_100_000_000), "0.14% of day · 0.02% of week limit")
+        // More than the week's limit.
+        XCTAssertEqual(Plan.limitShare(costMicros: 140_000_000, weeklyBudgetMicros: 70_000_000), "1400% of day · 200% of week limit")
+        XCTAssertEqual(Plan.limitShare(costMicros: 0, weeklyBudgetMicros: 70_000_000), "0% of day · 0% of week limit")
+    }
+
+    func testACostHasNoLimitShareWithoutALimit() {
+        XCTAssertNil(Plan.limitShare(costMicros: 2_800_000, weeklyBudgetMicros: nil))
+        XCTAssertNil(Plan.limitShare(costMicros: 2_800_000, weeklyBudgetMicros: 0))
+        XCTAssertNil(Plan.limitParts(costMicros: 2_800_000, weeklyBudgetMicros: nil))
+        XCTAssertNil(Plan.limitParts(costMicros: 2_800_000, weeklyBudgetMicros: 0))
+    }
+
+    func testTheLimitPartsAreTheDayAndTheWeek() throws {
+        // $11.27 of $2,100 a week, so $300 a day.
+        let parts = try XCTUnwrap(Plan.limitParts(costMicros: 11_270_000, weeklyBudgetMicros: 2_100_000_000))
+        XCTAssertEqual(parts.day, "3.8%")
+        XCTAssertEqual(parts.week, "0.54%")
+    }
+
+    func testASmallPercentKeepsDecimalsOnlyWhenItIsSmall() {
+        XCTAssertEqual(Format.smallPercent(0), "0%")
+        XCTAssertEqual(Format.smallPercent(0.00001), "<0.01%")
+        XCTAssertEqual(Format.smallPercent(0.0005), "0.05%")
+        XCTAssertEqual(Format.smallPercent(0.037), "3.7%")
+        XCTAssertEqual(Format.smallPercent(0.26), "26%")
+        XCTAssertEqual(Format.smallPercent(14), "1400%")
+        // At the edges the rounded number decides, so there is no "1.00%" or "10.0%".
+        XCTAssertEqual(Format.smallPercent(0.00999), "1.0%")
+        XCTAssertEqual(Format.smallPercent(0.0999), "10%")
+    }
+
     func testSettingsAreSaved() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "ccop-tests-\(UUID().uuidString)"))
         XCTAssertEqual(PlanSettings.load(defaults), PlanSettings())

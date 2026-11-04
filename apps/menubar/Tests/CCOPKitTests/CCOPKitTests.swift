@@ -100,6 +100,33 @@ final class SessionListTests: XCTestCase {
         XCTAssertEqual(SessionList.filter(sessions, query: "cart", period: .week, folder: .only("/p/shop"), now: now, calendar: utc).map(\.id), ["c"])
     }
 
+    func testThePeriodIsTodayTheFirstTimeThenTheOneChosenLast() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ccop-tests-\(UUID().uuidString)"))
+        XCTAssertEqual(Period.load(defaults), .today)
+        for period in Period.allCases {
+            period.save(defaults)
+            XCTAssertEqual(Period.load(defaults), period)
+        }
+        // A value from another version of the app.
+        defaults.set("year", forKey: Period.defaultsKey)
+        XCTAssertEqual(Period.load(defaults), .today)
+    }
+
+    func testTheFolderIsAllFoldersTheFirstTimeThenTheOneChosenLast() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ccop-tests-\(UUID().uuidString)"))
+        XCTAssertNil(FolderScope.load(defaults))
+        FolderScope.save(.withSubfolders("/p/shop"), defaults)
+        XCTAssertEqual(FolderScope.load(defaults), .withSubfolders("/p/shop"))
+        FolderScope.save(.only("/p/shop"), defaults)
+        XCTAssertEqual(FolderScope.load(defaults), .only("/p/shop"))
+        // Back to all folders.
+        FolderScope.save(nil, defaults)
+        XCTAssertNil(FolderScope.load(defaults))
+        // A saved value that cannot be read.
+        defaults.set(Data("not json".utf8), forKey: FolderScope.defaultsKey)
+        XCTAssertNil(FolderScope.load(defaults))
+    }
+
     func testFolderChoicesOfThePeriod() {
         let today = SessionList.folders(sessions, period: .today, now: now, calendar: utc)
         XCTAssertEqual(today, [FolderChoice(path: "/p/blog", label: "blog", sessions: 1),

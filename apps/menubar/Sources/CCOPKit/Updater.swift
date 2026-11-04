@@ -39,12 +39,17 @@ public enum Updater {
 
     // MARK: Pure logic (tested)
 
-    /// Why this copy must not update itself, or nil. A build without a Team ID
-    /// (`swift run`, scripts/build-app.sh, scripts/install.sh) is a local
-    /// build: the release would replace the code it was built from.
+    /// A build without a Team ID (`swift run`, scripts/build-app.sh,
+    /// scripts/install.sh) is a local build, "CCOP Dev".
+    public static func isLocalBuild(teamID: String?) -> Bool {
+        teamID?.isEmpty ?? true
+    }
+
+    /// Why this copy must not update itself, or nil. A local build must not:
+    /// the release would replace the code it was built from.
     /// Checked before any network call.
     public static func disabledReason(teamID: String?) -> String? {
-        guard teamID?.isEmpty ?? true else { return nil }
+        guard isLocalBuild(teamID: teamID) else { return nil }
         return "This is a local build, so it does not update itself. Build it again from source, or install a release from GitHub."
     }
 

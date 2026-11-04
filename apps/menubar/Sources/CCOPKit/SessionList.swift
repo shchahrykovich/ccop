@@ -8,6 +8,17 @@ public enum Period: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    public static let defaultsKey = "period"
+
+    /// The period chosen last; Today the first time, or for an unknown value.
+    public static func load(_ defaults: UserDefaults = .standard) -> Period {
+        defaults.string(forKey: defaultsKey).flatMap(Period.init(rawValue:)) ?? .today
+    }
+
+    public func save(_ defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+
     public var title: String {
         switch self {
         case .today: "Today"
@@ -53,9 +64,26 @@ public struct FolderChoice: Identifiable, Equatable, Sendable {
 
 /// Which folder the list shows: one folder alone, or a folder with all its
 /// subfolders (for example its worktrees in `.claude/worktrees`).
-public enum FolderScope: Equatable, Hashable, Sendable {
+public enum FolderScope: Codable, Equatable, Hashable, Sendable {
     case only(String)
     case withSubfolders(String)
+
+    public static let defaultsKey = "folder"
+
+    /// The folder chosen last; nil (all folders) the first time or for a
+    /// saved value that cannot be read.
+    public static func load(_ defaults: UserDefaults = .standard) -> FolderScope? {
+        defaults.data(forKey: defaultsKey).flatMap { try? JSONDecoder().decode(FolderScope.self, from: $0) }
+    }
+
+    /// Nil is all folders: nothing is saved.
+    public static func save(_ scope: FolderScope?, _ defaults: UserDefaults = .standard) {
+        if let scope, let data = try? JSONEncoder().encode(scope) {
+            defaults.set(data, forKey: defaultsKey)
+        } else {
+            defaults.removeObject(forKey: defaultsKey)
+        }
+    }
 
     public var path: String {
         switch self {

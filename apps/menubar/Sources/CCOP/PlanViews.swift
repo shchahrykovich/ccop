@@ -1,5 +1,6 @@
 import AppKit
 import CCOPKit
+import Charts
 import SwiftUI
 
 /// Today and this week against the limits, as two cards. In the popover and
@@ -87,6 +88,138 @@ struct PlanCards: View {
 
     static func percent(_ f: Double) -> String {
         f.isFinite ? "\(Int((f * 100).rounded()))%" : "limit"
+    }
+}
+
+/// This week against the week before, as two lines of the running total from
+/// each week's reset. In the popover, under the two cards.
+struct WeekCompareCard: View {
+    @Environment(AppModel.self) private var model
+    /// Saved: the whole limit week, or only from the reset to now.
+    @AppStorage("weekGraphSoFar") private var soFar = false
+
+    private struct Mark: Identifiable {
+        var week: String
+        var hour: Double
+        var value: Double
+        var id: String { "\(week) \(hour)" }
+    }
+
+    private static let thisWeek = "This week"
+    private static let lastWeek = "Last week"
+
+    var body: some View {
+        if let (status, c) = model.weekComparison {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    legend(Self.thisWeek, value: text(c.currentTotal, c), dashed: false)
+                    legend(Self.lastWeek, value: "\(text(c.previousByNow, c)) by now · \(text(c.previousTotal, c)) in all", dashed: true)
+                    Spacer(minLength: 0)
+                    Picker("Graph", selection: $soFar) {
+                        Text("Whole week").tag(false)
+                        Text("So far").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .fixedSize()
+                    .help("Whole week: from the reset of your weekly limit to the next reset. So far: from the reset to now.")
+                }
+                chart(status, soFar ? c.soFar : c).frame(height: 62)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.line2))
+            .help("Your use from each week's reset. The percents use your current weekly limit, for both weeks.")
+        }
+    }
+
+    /// A percent of the weekly limit; dollars without a limit.
+    private func text(_ micros: UInt64, _ c: WeekComparison) -> String {
+        if let b = c.budgetMicros, b > 0 { return Format.percent(Double(micros) / Double(b)) }
+        return Format.dollars(micros)
+    }
+
+    /// The value on the y axis: a part of the limit, or dollars.
+    private func value(_ micros: UInt64, _ c: WeekComparison) -> Double {
+        if let b = c.budgetMicros, b > 0 { return Double(micros) / Double(b) }
+        return Double(micros) / 1e6
+    }
+
+    /// The top of the y axis; 1% or $1 before anything is used.
+    private func top(_ c: WeekComparison) -> Double {
+        let hasLimit = (c.budgetMicros ?? 0) > 0
+        return c.peak == 0 ? (hasLimit ? 0.01 : 1) : Plan.axisTop(value(c.peak, c))
+    }
+
+    private func marks(_ c: WeekComparison) -> [Mark] {
+        // A line is made in order; the hours of one week never repeat.
+        c.previous.map { Mark(week: Self.lastWeek, hour: $0.hour, value: value($0.micros, c)) }
+            + c.current.map { Mark(week: Self.thisWeek, hour: $0.hour, value: value($0.micros, c)) }
+    }
+
+    private func chart(_ status: WeekStatus, _ c: WeekComparison) -> some View {
+        let top = top(c)
+        // The whole week, or from the reset to now, at least 1 hour wide.
+        let hours = soFar ? max(1, c.current.last?.hour ?? 1) : Plan.week / 3600
+        let ticks = Plan.axisTicks(from: status.weekStart, hours: hours)
+        return Chart {
+            ForEach(marks(c)) { m in
+                LineMark(x: .value("Hours", m.hour), y: .value("Used", m.value), series: .value("Week", m.week))
+                    .foregroundStyle(m.week == Self.thisWeek ? Theme.accent : Theme.text3)
+                    .lineStyle(m.week == Self.thisWeek ? StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                        : StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+            }
+            if let now = c.current.last {
+                PointMark(x: .value("Hours", now.hour), y: .value("Used", value(now.micros, c)))
+                    .foregroundStyle(Theme.accent)
+                    .symbolSize(22)
+            }
+        }
+        .chartLegend(.hidden)
+        .chartXScale(domain: 0.0 ... hours)
+        .chartYScale(domain: 0.0 ... top)
+        .chartXAxis {
+            AxisMarks(values: ticks.hours) { v in
+                AxisGridLine().foregroundStyle(Theme.line2)
+                AxisValueLabel(anchor: .topLeading) {
+                    if let hour = v.as(Double.self) {
+                        let date = status.weekStart.addingTimeInterval(hour * 3600)
+                        Text(ticks.byDay ? date.formatted(.dateTime.weekday(.abbreviated)) : date.formatted(date: .omitted, time: .shortened))
+                            .font(.ui(10)).monospacedDigit().foregroundStyle(Theme.text3)
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            // At the top left: both lines start low there, so nothing is under the label.
+            AxisMarks(position: .leading, values: [top]) { v in
+                AxisGridLine().foregroundStyle(Theme.line2)
+                AxisValueLabel(anchor: .topLeading) {
+                    if let y = v.as(Double.self) {
+                        Text(c.budgetMicros ?? 0 > 0 ? Format.smallPercent(y) : Format.dollars(UInt64(y * 1e6)))
+                            .font(.ui(10)).monospacedDigit().foregroundStyle(Theme.text3)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("This week \(text(c.currentTotal, c)). Last week \(text(c.previousByNow, c)) by now.")
+    }
+
+    private func legend(_ title: String, value: String, dashed: Bool) -> some View {
+        HStack(spacing: 5) {
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: 1))
+                p.addLine(to: CGPoint(x: 14, y: 1))
+            }
+            .stroke(dashed ? Theme.text3 : Theme.accent,
+                    style: StrokeStyle(lineWidth: dashed ? 1.2 : 2, dash: dashed ? [3, 3] : []))
+            .frame(width: 14, height: 2)
+            (Text(title + " ").foregroundStyle(Theme.text2) + Text(value).fontWeight(.semibold).foregroundStyle(Theme.text))
+                .font(.ui(11)).monospacedDigit().lineLimit(1)
+        }
     }
 }
 

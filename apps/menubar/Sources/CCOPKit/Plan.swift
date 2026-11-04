@@ -165,8 +165,107 @@ public struct WeekStatus: Equatable, Sendable {
     }
 }
 
+/// This week and the week before it, as running totals from each week's
+/// reset: is this week ahead of the last one?
+public struct WeekComparison: Equatable, Sendable {
+    public struct Point: Equatable, Sendable {
+        /// Hours since the week's reset.
+        public var hour: Double
+        /// The cost from the reset to this point.
+        public var micros: UInt64
+
+        public init(hour: Double, micros: UInt64) {
+            self.hour = hour
+            self.micros = micros
+        }
+    }
+
+    /// From the reset to now.
+    public var current: [Point]
+    /// The whole week before.
+    public var previous: [Point]
+    public var budgetMicros: UInt64?
+
+    /// Where the last week was at this point of the week.
+    public var previousByNow: UInt64 {
+        let now = current.last?.hour ?? 0
+        return previous.last { $0.hour <= now }?.micros ?? 0
+    }
+
+    public var previousTotal: UInt64 { previous.last?.micros ?? 0 }
+    public var currentTotal: UInt64 { current.last?.micros ?? 0 }
+    public var peak: UInt64 { max(currentTotal, previousTotal) }
+
+    /// Only the part of the week up to now: the last week's line stops where
+    /// this week is, at the value `previousByNow` gives.
+    public var soFar: WeekComparison {
+        let now = current.last?.hour ?? 0
+        var cut = previous.filter { $0.hour <= now }
+        if cut.last?.hour != now { cut.append(Point(hour: now, micros: previousByNow)) }
+        return WeekComparison(current: current, previous: cut, budgetMicros: budgetMicros)
+    }
+}
+
 public enum Plan {
     public static let week: TimeInterval = 7 * 24 * 3600
+
+    /// The top of a graph's y axis: the first round number at or above `value`
+    /// (1.14 gives 1.2, 0.07 gives 0.08), so the label reads well.
+    public static func axisTop(_ value: Double) -> Double {
+        guard value > 0, value.isFinite else { return 1 }
+        let magnitude = pow(10, floor(log10(value)))
+        let factor = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].first { $0 * magnitude >= value * (1 - 1e-9) } ?? 10
+        return factor * magnitude
+    }
+
+    /// The marks on a graph's time axis, in hours after `start`. Over 36 hours:
+    /// each midnight (`byDay`). Shorter: round clock hours, 1, 2 or 6 hours apart.
+    public static func axisTicks(from start: Date, hours: Double,
+                                 calendar: Calendar = .current) -> (hours: [Double], byDay: Bool) {
+        let end = start.addingTimeInterval(hours * 3600)
+        var out: [Double] = []
+        func add(_ date: Date) {
+            if date > start, date < end { out.append(date.timeIntervalSince(start) / 3600) }
+        }
+        if hours > 36 {
+            var day = calendar.startOfDay(for: start)
+            while day < end, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+                add(day)
+                day = next
+            }
+            return (out, true)
+        }
+        let step = hours <= 6 ? 1 : hours <= 12 ? 2 : 6
+        var date = calendar.dateInterval(of: .hour, for: start)?.start ?? start
+        while date < end {
+            if calendar.component(.hour, from: date) % step == 0 { add(date) }
+            date = date.addingTimeInterval(3600)
+        }
+        return (out, false)
+    }
+
+    /// This week and the week before from the hours of the report. An hour
+    /// that a reset cuts counts in both weeks, as in `UsageReport.cost`.
+    public static func comparison(_ status: WeekStatus, report: UsageReport, now: Date) -> WeekComparison {
+        func running(from: Date, to: Date) -> [WeekComparison.Point] {
+            let span = to.timeIntervalSince(from) / 3600
+            var costs = [UInt64](repeating: 0, count: max(1, Int(span.rounded(.up))))
+            for h in report.hours where h.start.addingTimeInterval(3600) > from && h.start < to {
+                let i = Int((h.start.timeIntervalSince(from) / 3600).rounded(.down))
+                costs[min(max(i, 0), costs.count - 1)] += h.costMicros
+            }
+            var total: UInt64 = 0
+            var out = [WeekComparison.Point(hour: 0, micros: 0)]
+            for (i, cost) in costs.enumerated() {
+                total += cost
+                out.append(WeekComparison.Point(hour: min(Double(i + 1), span), micros: total))
+            }
+            return out
+        }
+        return WeekComparison(current: running(from: status.weekStart, to: min(now, status.weekEnd)),
+                              previous: running(from: status.weekStart.addingTimeInterval(-week), to: status.weekStart),
+                              budgetMicros: status.budgetMicros)
+    }
 
     /// The latest reset at or before `now`: the anchor plus or minus whole weeks.
     public static func weekStart(anchor: Date, now: Date) -> Date {
@@ -255,6 +354,26 @@ public enum Plan {
         return (s, true)
     }
 
+    /// A cost as a part of the limits: `28% of day · 4% of week limit`. The day
+    /// is the daily share (1/7 of the weekly limit), not today's allowance, so
+    /// the number of a past session does not change with today's use. Nil
+    /// without a limit.
+    public static func limitShare(costMicros: UInt64, weeklyBudgetMicros: UInt64?) -> String? {
+        limitParts(costMicros: costMicros, weeklyBudgetMicros: weeklyBudgetMicros).map {
+            "\($0.day) of day · \($0.week) of week limit"
+        }
+    }
+
+    /// The two percents of `limitShare`, for a table with a column for each.
+    public static func limitParts(costMicros: UInt64, weeklyBudgetMicros: UInt64?) -> (day: String, week: String)? {
+        guard let budget = weeklyBudgetMicros, budget > 0 else { return nil }
+        let week = Double(costMicros) / Double(budget)
+        return (Format.smallPercent(week * 7), Format.smallPercent(week))
+    }
+
+    /// The tooltip of `limitShare` and `limitParts`.
+    public static let limitShareHelp = "The whole cost against your limits, even if it ran over several days. The week limit is the one from /usage. The day limit is 1/7 of it, so a cost can be over 100% of a day."
+
     /// The hue for a part of the allowance: green (1/3) at 0, yellow (1/6)
     /// at half, red (0) at the whole allowance and above.
     public static func hue(ofAllowance fraction: Double) -> Double {
@@ -263,6 +382,17 @@ public enum Plan {
 }
 
 public extension Format {
+    /// A part of a limit or a total. One subagent is often under 1% of the week, so small
+    /// values keep decimals: `<0.01%`, `0.05%`, `3.7%`, `26%`.
+    static func smallPercent(_ ratio: Double) -> String {
+        let p = ratio * 100
+        if p <= 0 { return "0%" }
+        if p < 0.01 { return "<0.01%" }
+        if (p * 100).rounded() / 100 < 1 { return String(format: "%.2f%%", p) }
+        if (p * 10).rounded() / 10 < 10 { return String(format: "%.1f%%", p) }
+        return "\(Int(p.rounded()))%"
+    }
+
     /// `$0.42`, `$12.30`, `$1,234`.
     static func dollars(_ micros: UInt64) -> String {
         let d = Double(micros) / 1e6

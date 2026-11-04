@@ -48,6 +48,7 @@ struct ContextView: View {
         let lane = anatomy.lane(laneID).flatMap { $0.context.isEmpty ? nil : $0 } ?? lanes.first
         PageScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                TokenTimeline(anatomy: anatomy)
                 header(lanes, current: lane)
                 if let lane, !lane.context.isEmpty {
                     let index = min(max((selectedCall ?? lane.context.count) - 1, 0), lane.context.count - 1)

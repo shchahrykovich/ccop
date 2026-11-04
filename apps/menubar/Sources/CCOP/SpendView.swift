@@ -26,7 +26,6 @@ struct SpendView: View {
             .padding(.horizontal, 24)
             .padding(.top, 22)
             .padding(.bottom, 28)
-            .frame(maxWidth: 1000, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -34,9 +33,17 @@ struct SpendView: View {
     /// The cost, then what it means; side by side on their first baselines, wrapping when narrow.
     private func header(_ s: Spend) -> some View {
         BaselineWrap(columnGap: 18, rowGap: 10) {
-            Text(Format.dollars(s.costMicros))
-                .font(.system(size: 28, weight: .semibold)).tracking(-0.56).monospacedDigit()
-                .help(facts(s))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Format.dollars(s.costMicros))
+                    .font(.system(size: 28, weight: .semibold)).tracking(-0.56).monospacedDigit()
+                    .help(facts(s))
+                if let share = Plan.limitShare(costMicros: s.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros) {
+                    Text(share)
+                        .font(.system(size: 11)).foregroundStyle(SpendStyle.text3).monospacedDigit()
+                        .fixedSize()
+                        .help(Plan.limitShareHelp)
+                }
+            }
             Paragraph(
                 text: "Every model call reads the whole context again. So a session costs about: model calls × context size. Each call's cost goes to what made the model run.",
                 size: 13, color: SpendStyle.text2)
@@ -47,13 +54,8 @@ struct SpendView: View {
 
     /// The smaller numbers about the cost, shown when the pointer is on it.
     private func facts(_ s: Spend) -> String {
-        var parts = ["API-equivalent cost"]
-        if let budget = model.plan.weeklyBudgetMicros, budget > 0 {
-            parts.append("\(Format.percent(Double(s.costMicros) / Double(budget))) of your weekly limit")
-        }
-        parts.append("\(Format.tokens(s.tokens)) tokens")
-        parts.append("\(s.lanes.reduce(0) { $0 + $1.modelCalls }) model calls")
-        return parts.joined(separator: " · ")
+        ["API-equivalent cost", "\(Format.tokens(s.tokens)) tokens", "\(s.lanes.reduce(0) { $0 + $1.modelCalls }) model calls"]
+            .joined(separator: " · ")
     }
 }
 
@@ -587,7 +589,7 @@ struct CommandTable: View {
                 .help("Bash calls by the program they ran (after `cd <folder> &&`). Cost: the model calls after their results. Context added: tokens the output put into the context (estimated). Click a call to see its whole input and output.")
             VStack(spacing: 0) {
                 AutoColumns(maxContent: columns) {
-                    ColumnTitle("Program").cell(padding: 0)
+                    ColumnTitle("Program").padding(.leading, Self.chevronWidth).cell(padding: 0)
                     ColumnTitle("Calls").cell(.trailing)
                     ColumnTitle("Context added").cell(.trailing)
                     ColumnTitle("Errors").cell(.trailing)
@@ -599,7 +601,17 @@ struct CommandTable: View {
                     let isOpen = open.contains(g.group)
                     RowLine()
                     AutoColumns(maxContent: columns) {
-                        Text(row.cells[0]).font(.system(size: SpendStyle.row, design: .monospaced)).cell(padding: 0)
+                        HStack(spacing: 0) {
+                            // Shows that a click opens the program's calls.
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(SpendStyle.text3)
+                                .rotationEffect(.degrees(isOpen ? 90 : 0))
+                                .frame(width: Self.chevronWidth, alignment: .leading)
+                                .accessibilityHidden(true)
+                            Text(row.cells[0]).font(.system(size: SpendStyle.row, design: .monospaced))
+                        }
+                        .cell(padding: 0)
                         Text(row.cells[1]).cell(.trailing)
                         Text(row.cells[2]).cell(.trailing)
                         Text(row.cells[3]).cell(.trailing)
@@ -635,6 +647,9 @@ struct CommandTable: View {
         }
     }
 
+    /// The room for the chevron before a program's name.
+    private static let chevronWidth: CGFloat = 15
+
     /// The max-content width of each column (header and cells, with the cells' 1 pt padding),
     /// as an HTML table with `width: 100%` and no set widths measures them.
     private static func columns(_ rows: [[String]]) -> [CGFloat] {
@@ -646,7 +661,7 @@ struct CommandTable: View {
         return titles.indices.map { i in
             let font = i == 0 ? mono : (i == 4 ? digitsBold : digits)
             let widest = rows.map { SpendStyle.width($0[i], font) }.max() ?? 0
-            return max(widest, SpendStyle.width(titles[i], header)) + (i == 0 ? 0 : 2)
+            return max(widest, SpendStyle.width(titles[i], header)) + (i == 0 ? chevronWidth : 2)
         }
     }
 
@@ -713,7 +728,21 @@ struct CallList: View {
     @State private var byCost = false
 
     var body: some View {
-        let rows = byCost ? items.sorted { $0.costMicros > $1.costMicros } : items
+        let rows = (byCost ? items.sorted { $0.costMicros > $1.costMicros } : items).compactMap { item -> CallRow.Values? in
+            guard let lane = anatomy.lane(item.lane), lane.events.indices.contains(item.event) else { return nil }
+            let e = lane.events[item.event]
+            return CallRow.Values(
+                item: item,
+                time: e.start.formatted(date: .omitted, time: .standard),
+                agent: lane.name,
+                command: e.command ?? e.text ?? "",
+                isError: e.isError,
+                output: e.resultBytes.map { Format.bytes($0) } ?? "",
+                added: e.addedTokens.map { Format.tokens($0) } ?? "",
+                cost: Format.dollars(item.costMicros),
+                help: [e.text, e.command, e.error].compactMap { $0 }.joined(separator: "\n\n"))
+        }
+        let widths = CallRow.Widths(rows)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("\(items.count) calls. Added: tokens the output put into the context (estimated). Cost: its part of the model call after it.")
@@ -722,39 +751,119 @@ struct CallList: View {
                 Segmented(options: [(false, "By time"), (true, "By cost")], selection: $byCost, height: 20)
                     .frame(width: 160)
             }
-            Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
-                GridRow {
+            VStack(spacing: 0) {
+                CallRow.columns(widths) {
                     ColumnTitle("Time")
-                    ColumnTitle("Agent").gridColumnAlignment(.leading)
-                    ColumnTitle("Command").gridColumnAlignment(.leading)
+                    ColumnTitle("Agent")
+                    ColumnTitle("Command")
                     ColumnTitle("Output")
                     ColumnTitle("Added")
                     ColumnTitle("Cost")
                 }
-                ForEach(rows, id: \.self) { item in
-                    if let lane = anatomy.lane(item.lane), lane.events.indices.contains(item.event) {
-                        let e = lane.events[item.event]
-                        GridRow {
-                            Text(e.start.formatted(date: .omitted, time: .standard)).foregroundStyle(SpendStyle.text3)
-                            Text(lane.name).lineLimit(1).frame(maxWidth: 160, alignment: .leading)
-                            Text(e.command ?? e.text ?? "").font(.system(size: 11, design: .monospaced)).lineLimit(1)
-                                .foregroundStyle(e.isError ? Theme.bad : SpendStyle.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .help([e.text, e.command, e.error].compactMap { $0 }.joined(separator: "\n\n"))
-                            Text(e.resultBytes.map { Format.bytes($0) } ?? "")
-                            Text(e.addedTokens.map { Format.tokens($0) } ?? "")
-                            Text(Format.dollars(item.costMicros)).fontWeight(.medium)
-                        }
-                        .font(.system(size: 11))
-                        .monospacedDigit()
-                        .contentShape(Rectangle())
-                        .onTapGesture { shownCall = CallRef(lane: item.lane, index: item.event) }
-                    }
+                .padding(.horizontal, CallRow.inset)
+                .padding(.bottom, 3)
+                ForEach(rows, id: \.item) { row in
+                    CallRow(values: row, widths: widths) { shownCall = CallRef(lane: row.item.lane, index: row.item.event) }
                 }
             }
         }
         .padding(10)
         .background(SpendStyle.soft, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(SpendStyle.line2))
+    }
+}
+
+/// One call in the list of a program. The whole row lights up under the
+/// pointer, to show that a click opens this call in full.
+private struct CallRow: View {
+    struct Values {
+        var item: CallCost
+        var time: String
+        var agent: String
+        var command: String
+        var isError: Bool
+        var output: String
+        var added: String
+        var cost: String
+        var help: String
+    }
+
+    /// Every column but Command, which takes the rest. As wide as the widest
+    /// value or title; an agent's name at most 160.
+    struct Widths {
+        var time: CGFloat
+        var agent: CGFloat
+        var output: CGFloat
+        var added: CGFloat
+        var cost: CGFloat
+
+        init(_ rows: [Values]) {
+            let title = NSFont.systemFont(ofSize: 11, weight: .medium)
+            let digits = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            let bold = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            func width(_ name: String, _ font: NSFont, _ value: KeyPath<Values, String>) -> CGFloat {
+                max(SpendStyle.width(name, title), rows.map { SpendStyle.width($0[keyPath: value], font) }.max() ?? 0)
+            }
+            time = width("Time", digits, \.time)
+            agent = min(160, width("Agent", digits, \.agent))
+            output = width("Output", digits, \.output)
+            added = width("Added", digits, \.added)
+            cost = width("Cost", bold, \.cost)
+        }
+    }
+
+    /// How far the highlight reaches past the text.
+    static let inset: CGFloat = 5
+
+    let values: Values
+    let widths: Widths
+    let action: () -> Void
+    @State private var hovering = false
+
+    /// Six cells in the columns: Time, Agent, Command, Output, Added, Cost.
+    static func columns<A: View, B: View, C: View, D: View, E: View, F: View>(
+        _ w: Widths, @ViewBuilder cells: () -> TupleView<(A, B, C, D, E, F)>) -> some View {
+        let c = cells().value
+        return HStack(spacing: 12) {
+            c.0.frame(width: w.time, alignment: .trailing)
+            c.1.frame(width: w.agent, alignment: .leading)
+            c.2.frame(maxWidth: .infinity, alignment: .leading)
+            c.3.frame(width: w.output, alignment: .trailing)
+            c.4.frame(width: w.added, alignment: .trailing)
+            c.5.frame(width: w.cost, alignment: .trailing)
+        }
+    }
+
+    var body: some View {
+        Self.columns(widths) {
+            Text(values.time).foregroundStyle(SpendStyle.text3)
+            Text(values.agent).lineLimit(1)
+            Text(values.command).font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                .foregroundStyle(values.isError ? Theme.bad : SpendStyle.text)
+            Text(values.output)
+            Text(values.added)
+            Text(values.cost).fontWeight(.medium)
+        }
+        .font(.system(size: 11))
+        .monospacedDigit()
+        .padding(.horizontal, Self.inset)
+        .padding(.vertical, 2)
+        .background(hovering ? SpendStyle.accent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 4))
+        .contentShape(Rectangle())
+        .help(values.help)
+        .onHover { inside in
+            guard inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        // A row can go away under the pointer: the list closes or sorts again.
+        .onDisappear {
+            if hovering { NSCursor.pop() }
+            hovering = false
+        }
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows this call in full")
     }
 }
