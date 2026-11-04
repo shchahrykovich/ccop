@@ -418,6 +418,34 @@ final class AppModel {
         copy(Resume.command(s))
     }
 
+    /// The guide for agents and this session, ready to paste into an agent.
+    func copyForAgent(_ s: Session) {
+        guard let source else { error = SessionSourceError.cliNotFound.localizedDescription; return }
+        let cli = (source as? CLISessionSource)?.cli.path
+        Task {
+            let guide = await Task.detached(priority: .userInitiated) { Result { try source.guide() } }.value
+            switch guide {
+            case let .success(text): copy(AgentPrompt.text(guide: text, session: s, cli: cli))
+            case let .failure(e): error = "Could not read the guide for agents: \(e.localizedDescription)"
+            }
+        }
+    }
+
+    /// The help page of this bundle, in the default web browser: the app for
+    /// .html files may be an editor. It is made by scripts/build-app.sh.
+    /// Returns false when this build has no page.
+    func openHelp() -> Bool {
+        let page = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/help.html")
+        guard FileManager.default.fileExists(atPath: page.path) else { return false }
+        NSApp.activate()
+        if let https = URL(string: "https://example.com"), let browser = NSWorkspace.shared.urlForApplication(toOpen: https) {
+            NSWorkspace.shared.open([page], withApplicationAt: browser, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(page)
+        }
+        return true
+    }
+
     /// Opens Terminal with `claude --resume` in the session's folder.
     func resumeInTerminal(_ s: Session) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ccop-resume-\(s.id).command")

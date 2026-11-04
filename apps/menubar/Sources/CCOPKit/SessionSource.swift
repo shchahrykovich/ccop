@@ -13,6 +13,8 @@ public protocol SessionSource: Sendable {
     func call(_ sessionID: String, toolUseID: String) throws -> ToolCall
     /// Tokens and API-equivalent cost by hour: `ccop usage --json`.
     func usage(days: Int) throws -> UsageReport
+    /// The instructions for agents: `ccop guide`.
+    func guide() throws -> String
 }
 
 public enum SessionSourceError: Error, LocalizedError, Equatable {
@@ -71,6 +73,10 @@ public struct CLISessionSource: SessionSource {
 
     public func usage(days: Int) throws -> UsageReport {
         try UsageReport.decode(run(["usage", "--json", "--days", String(days)]))
+    }
+
+    public func guide() throws -> String {
+        String(decoding: try run(["guide"]), as: UTF8.self)
     }
 
     /// Runs the CLI and returns what it printed; throws with its stderr when it fails.

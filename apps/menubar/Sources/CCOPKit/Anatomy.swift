@@ -220,6 +220,8 @@ public struct Cause: Codable, Equatable, Sendable, Identifiable {
     public var errorCostMicros: UInt64
     public var avgContext: UInt64
     public var addedTokens: UInt64
+    /// Every call behind this cause, in time order (`Cause.items` in spend.rs).
+    public var items: [CallCost]
     public var id: String { "\(kind.rawValue) \(name)" }
 }
 

@@ -93,6 +93,9 @@ struct SessionDetailView: View {
                 Button { model.copyResumeCommand(s) } label: { IconLabel(title: "Copy command", symbol: "doc.on.doc", iconSize: 14) }
                     .buttonStyle(DesignButtonStyle(kind: .bordered, height: 28, padding: 10))
                     .help(Resume.command(s))
+                Button { model.copyForAgent(s) } label: { IconLabel(title: "Copy for Agent", symbol: "sparkles", iconSize: 14) }
+                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 28, padding: 10))
+                    .help("Copy the instructions for an agent and this session's id. Paste them into an agent and add your question.")
                 Spacer()
                 SmallIconButton(symbol: "doc.text", help: "Show the transcript in Finder", size: 28, fill: Theme.bg) { model.revealTranscript(s) }
                 SmallIconButton(symbol: "folder", help: "Open the project folder", size: 28, fill: Theme.bg) { model.openProjectFolder(s) }
@@ -143,6 +146,9 @@ struct SessionDetailView: View {
                     Button("Copy resume command") { model.copyResumeCommand(s) }
                         .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
                         .help(Resume.command(s))
+                    Button("Copy for Agent") { model.copyForAgent(s) }
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
+                        .help("Copy the instructions for an agent and this session's id. Paste them into an agent and add your question.")
                     Button("Show transcript") { model.revealTranscript(s) }
                         .buttonStyle(DesignButtonStyle(kind: .bordered, height: 30, radius: 7, padding: 12))
                     Button("Open folder") { model.openProjectFolder(s) }

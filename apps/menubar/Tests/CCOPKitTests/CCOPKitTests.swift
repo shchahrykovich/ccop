@@ -218,6 +218,16 @@ final class SessionSourceTests: XCTestCase {
         XCTAssertEqual(try CLISessionSource(cli: cli).load(), [])
     }
 
+    func testTheGuideIsWhatTheCLIPrints() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cli = dir.appendingPathComponent("ccop")
+        try "#!/bin/sh\n[ \"$1\" = guide ] && echo '# The guide'\n".write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        XCTAssertEqual(try CLISessionSource(cli: cli).guide(), "# The guide\n")
+    }
+
     func testAFailingCLIReportsItsMessage() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

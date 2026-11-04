@@ -18,6 +18,25 @@ It reads the transcript files that Claude Code already writes to `~/.claude/proj
 
 Costs are "API-equivalent": what the same calls would cost at Anthropic API prices. Anthropic does not publish plan limits as numbers. ccop runs `claude -p /usage` when it starts and then every hour, and takes the weekly percent and the reset time from it. From that percent and the cost it measured, it works out the weekly limit in dollars and the share for today. If `claude` is not found, you can type the numbers in Plan settings.
 
+## Ask an agent to look at your sessions
+
+An agent can tell you why a session cost so much and how to make it faster. It reads short reports from the `ccop` command. ccop adds nothing to `CLAUDE.md`, so your other sessions do not pay for it.
+
+1. Right-click the menu bar item and choose **Install Command Line Tool…**. It links `ccop` into `~/.local/bin`.
+2. Right-click a session in the list and choose **Copy for Agent**. It copies the instructions for agents and the session's id. **Help** in the same menu has a button that copies only the instructions, and `ccop guide` prints them.
+3. Paste it into an agent and add your question. For example: "How can this session use fewer tokens?"
+
+The reports the agent reads:
+
+| Command | What it gives |
+|---|---|
+| `ccop brief <id>` | A short report on one session, about 2 KB |
+| `ccop brief --since 7d` | The same for many sessions |
+| `ccop top commands --since 7d` | A list of commands, causes, agents, sessions, turns, errors, projects or tips. `--by time` gives the slowest |
+| `ccop cause <id> Bash` | The costliest calls of a tool or a program |
+| `ccop time <id>` | Where the clock went: model, tools, subagents, waiting |
+| `ccop call <id> <tool_use_id> --max-bytes 4000` | One tool call, cut at that size |
+
 ## Requirements
 
 - macOS 14 or later
@@ -36,7 +55,7 @@ scripts/install.sh --user --launch
 
 Without `--user` it installs to `/Applications`. A build from source is ad-hoc signed: it runs on your Mac, but it does not update itself.
 
-The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for the window, plan settings, Refresh, updates and Quit.
+The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for the window, plan settings, Refresh, Help, the command line tool, updates and Quit.
 
 ## Updates
 

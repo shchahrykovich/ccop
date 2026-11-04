@@ -5,9 +5,11 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use ccop_core::anatomy::{self, Anatomy, LaneMeta, LaneReader};
+use ccop_core::rollup::Rollup;
 
 pub fn read(session_id: &str, transcript: &Path) -> Result<Anatomy> {
     let main = read_lane(transcript, LaneReader::main()).with_context(|| format!("cannot read {}", transcript.display()))?;
@@ -29,6 +31,38 @@ pub fn read(session_id: &str, transcript: &Path) -> Result<Anatomy> {
         }
     }
     Ok(anatomy::build(session_id, main, subagents))
+}
+
+/// Reads many sessions on up to 8 threads and adds them up. A session that
+/// cannot be read is counted in the second number.
+pub fn rollup(sessions: &[&ccop_core::Session]) -> (Rollup, u64) {
+    let next = AtomicUsize::new(0);
+    let threads = sessions.len().clamp(1, 8);
+    let parts: Vec<(Rollup, u64)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut total = Rollup::default();
+                    let mut unreadable = 0;
+                    while let Some(s) = sessions.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        match read(&s.id, Path::new(&s.transcript)) {
+                            Ok(a) => total.merge(Rollup::of(s, &a)),
+                            Err(_) => unreadable += 1,
+                        }
+                    }
+                    (total, unreadable)
+                })
+            })
+            .collect();
+        workers.into_iter().map(|w| w.join().unwrap_or_default()).collect()
+    });
+    let mut total = Rollup::default();
+    let mut unreadable = 0;
+    for (part, n) in parts {
+        total.merge(part);
+        unreadable += n;
+    }
+    (total, unreadable)
 }
 
 /// The file of one lane: `main`, or a subagent's id.

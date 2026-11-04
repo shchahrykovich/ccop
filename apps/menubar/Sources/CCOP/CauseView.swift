@@ -18,7 +18,7 @@ struct CauseView: View {
                         ForEach(causes) { c in chip(c, on: c.id == cause.id) }
                     }
                     summary(cause)
-                    CallList(anatomy: anatomy, items: anatomy.calls(of: cause), shownCall: $shownCall)
+                    CallList(anatomy: anatomy, items: cause.items, shownCall: $shownCall)
                         .id(cause.id)
                 } else {
                     Text("This session has no model calls with a cost.")

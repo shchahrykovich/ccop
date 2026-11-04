@@ -25,6 +25,37 @@ pub struct ToolCall {
     pub is_error: bool,
 }
 
+impl ToolCall {
+    /// Cuts the output and each long text in the input at `max_bytes`, so one
+    /// call cannot fill an agent's context. `output_bytes` stays the whole size.
+    pub fn limit(&mut self, max_bytes: usize) {
+        limit_strings(&mut self.input, max_bytes);
+        if let Some(output) = &mut self.output
+            && output.len() > max_bytes
+        {
+            output.truncate(char_boundary(output, max_bytes));
+            self.output_truncated = true;
+        }
+    }
+}
+
+/// The largest index at or under `at` that does not split a character.
+fn char_boundary(text: &str, at: usize) -> usize {
+    (0..=at.min(text.len())).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0)
+}
+
+fn limit_strings(value: &mut Value, max_bytes: usize) {
+    match value {
+        Value::String(s) if s.len() > max_bytes => {
+            s.truncate(char_boundary(s, max_bytes));
+            s.push('…');
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| limit_strings(v, max_bytes)),
+        Value::Object(fields) => fields.values_mut().for_each(|v| limit_strings(v, max_bytes)),
+        _ => {}
+    }
+}
+
 /// Finds one call in the lines of a transcript file. A line is parsed only
 /// when it contains the id, so a 16 MB file is read in a few milliseconds.
 pub struct CallFinder {
@@ -142,6 +173,33 @@ mod tests {
         assert_eq!(call.output.as_deref(), Some("line 1\nline 2"));
         assert_eq!(call.output_bytes, 12);
         assert!(call.is_error);
+        assert!(!call.output_truncated);
+    }
+
+    #[test]
+    fn a_limit_cuts_the_output_and_the_input_on_a_whole_character() {
+        let lines = [
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Write",
+                   "input": {"file_path": "/p/a.md", "content": "ж".repeat(10), "parts": ["ж".repeat(10)]}}]}}),
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ж".repeat(10)}]}}),
+        ];
+        let mut call = find("t1", &lines).0.unwrap();
+        call.limit(7);
+        // "ж" is 2 bytes: 7 bytes hold 3 whole ones.
+        assert_eq!(call.output.as_deref(), Some("жжж"));
+        assert!(call.output_truncated);
+        assert_eq!(call.output_bytes, 20, "the whole size stays");
+        assert_eq!(call.input["file_path"], "/p/a.md", "a short text stays");
+        assert_eq!(call.input["content"], "жжж…");
+        assert_eq!(call.input["parts"][0], "жжж…");
+    }
+
+    #[test]
+    fn a_limit_above_the_size_changes_nothing() {
+        let lines = [json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "short"}]}})];
+        let mut call = find("t1", &lines).0.unwrap();
+        call.limit(5);
+        assert_eq!(call.output.as_deref(), Some("short"));
         assert!(!call.output_truncated);
     }
 

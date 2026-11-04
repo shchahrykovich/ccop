@@ -78,6 +78,14 @@ if [[ ! -f "$icon_cache" || "$ROOT/scripts/make-icon.swift" -nt "$icon_cache" ]]
 fi
 cp "$icon_cache" "$APP/Contents/Resources/AppIcon.icns"
 
+# The help page the menu's Help opens in the browser. Through a temp file, so a
+# failed run leaves no half-written page in the bundle.
+help_page="$(mktemp)"
+"$APP/Contents/Helpers/ccop" help-page > "$help_page"
+grep -q "<title>ccop help</title>" "$help_page" || cc_die "the help page has no title"
+mv "$help_page" "$APP/Contents/Resources/help.html"
+chmod 644 "$APP/Contents/Resources/help.html"
+
 cc_say "Signing ($([[ "$identity" == "-" ]] && echo ad-hoc || echo "Developer ID"))"
 if [[ "$identity" == "-" ]]; then
     flags=(--force --sign - --timestamp=none)

@@ -565,7 +565,19 @@
         "tokens": 31389,
         "error_cost_micros": 0,
         "avg_context": 20836,
-        "added_tokens": 0
+        "added_tokens": 0,
+        "items": [
+          {
+            "lane": "main",
+            "event": 0,
+            "cost_micros": 102412
+          },
+          {
+            "lane": "main",
+            "event": 6,
+            "cost_micros": 8552
+          }
+        ]
       },
       {
         "kind": "task",
@@ -577,7 +589,14 @@
         "tokens": 9052,
         "error_cost_micros": 0,
         "avg_context": 9002,
-        "added_tokens": 0
+        "added_tokens": 0,
+        "items": [
+          {
+            "lane": "a1",
+            "event": 0,
+            "cost_micros": 23004
+          }
+        ]
       },
       {
         "kind": "compact",
@@ -589,7 +608,14 @@
         "tokens": 11266,
         "error_cost_micros": 0,
         "avg_context": 22501,
-        "added_tokens": 0
+        "added_tokens": 0,
+        "items": [
+          {
+            "lane": "main",
+            "event": 5,
+            "cost_micros": 8552
+          }
+        ]
       },
       {
         "kind": "tool",
@@ -601,7 +627,14 @@
         "tokens": 10872,
         "error_cost_micros": 0,
         "avg_context": 21704,
-        "added_tokens": 3
+        "added_tokens": 3,
+        "items": [
+          {
+            "lane": "main",
+            "event": 3,
+            "cost_micros": 6653
+          }
+        ]
       },
       {
         "kind": "tool",
@@ -613,7 +646,14 @@
         "tokens": 10872,
         "error_cost_micros": 0,
         "avg_context": 21704,
-        "added_tokens": 1578
+        "added_tokens": 1578,
+        "items": [
+          {
+            "lane": "main",
+            "event": 2,
+            "cost_micros": 6653
+          }
+        ]
       },
       {
         "kind": "tool",
@@ -625,7 +665,14 @@
         "tokens": 9328,
         "error_cost_micros": 0,
         "avg_context": 9303,
-        "added_tokens": 251
+        "added_tokens": 251,
+        "items": [
+          {
+            "lane": "a1",
+            "event": 2,
+            "cost_micros": 2802
+          }
+        ]
       },
       {
         "kind": "tool",
@@ -637,7 +684,14 @@
         "tokens": 0,
         "error_cost_micros": 0,
         "avg_context": 0,
-        "added_tokens": 0
+        "added_tokens": 0,
+        "items": [
+          {
+            "lane": "main",
+            "event": 8,
+            "cost_micros": 0
+          }
+        ]
       }
     ],
     "lanes": [

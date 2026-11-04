@@ -120,6 +120,9 @@ pub struct Cause {
     pub avg_context: u64,
     /// Tokens this cause added to contexts. Estimated (see `context.rs`).
     pub added_tokens: u64,
+    /// Every call behind this cause, in time order. For `Other`: the model
+    /// calls with nothing before them, at their whole cost.
+    pub items: Vec<CallCost>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,7 +139,7 @@ pub struct LaneSpend {
     pub sonnet_cost_micros: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TipKind {
     ManyCalls,
@@ -184,6 +187,8 @@ struct Acc {
     error_cost: f64,
     context: f64,
     added: u64,
+    /// (lane index, event index) of each call behind the cause.
+    items: Vec<(usize, usize)>,
 }
 
 pub fn analyze(lanes: &[Lane]) -> Spend {
@@ -220,6 +225,7 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
                     let Some(u) = e.usage else { continue };
                     if since.is_empty() {
                         since.push(((CauseKind::Other, "Other".to_string()), false, None));
+                        causes.entry((CauseKind::Other, "Other".to_string())).or_default().items.push((li, ei));
                     }
                     let n = since.len() as f64;
                     let (cost, tokens, ctx) = (event_cost(e) as f64, u.total() as f64, context_of(e) as f64);
@@ -245,6 +251,7 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
             let a = causes.entry(key.clone()).or_default();
             a.count += 1;
             a.errors += e.is_error as u64;
+            a.items.push((li, ei));
             if e.kind != EventKind::Compact {
                 a.added += e.added_tokens.unwrap_or(0);
             }
@@ -265,6 +272,7 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
             error_cost_micros: a.error_cost.round() as u64,
             avg_context: if a.calls > 0.0 { (a.context / a.calls).round() as u64 } else { 0 },
             added_tokens: a.added,
+            items: cause_items(lanes, &a.items, &paid),
         })
         .collect();
     causes.sort_by(|a, b| b.cost_micros.cmp(&a.cost_micros).then(a.name.cmp(&b.name)));
@@ -283,6 +291,25 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
     }
     tips.sort_by_key(|t| std::cmp::Reverse(t.saving_micros.unwrap_or(t.cost_micros)));
     (Spend { cost_micros, tokens, causes, lanes: lane_spends, tips, commands, errors }, paid)
+}
+
+/// The calls of one cause in time order. A sort that keeps equal times in
+/// the order of the lanes. A call with no model call after it costs 0; a model
+/// call that is its own cause costs what it costs.
+fn cause_items(lanes: &[Lane], places: &[(usize, usize)], paid: &BTreeMap<(usize, usize), Paid>) -> Vec<CallCost> {
+    let mut places = places.to_vec();
+    places.sort_by_key(|&(li, ei)| lanes[li].events[ei].start);
+    places
+        .into_iter()
+        .map(|(li, ei)| {
+            let e = &lanes[li].events[ei];
+            let cost_micros = match e.kind {
+                EventKind::Answer => event_cost(e),
+                _ => paid.get(&(li, ei)).map_or(0, |p| p.cost_micros.round() as u64),
+            };
+            CallCost { lane: lanes[li].id.clone(), event: ei, cost_micros }
+        })
+        .collect()
 }
 
 /// Bash calls by program, and failed calls by the start of their error.
@@ -879,6 +906,53 @@ mod tests {
 
     // Opus 5.5 per token in µ$: input 4, output 20, 1-hour write 8, read 0.20.
     // Sonnet 5.5: input 2, output 10, 1-hour write 4, read 0.20.
+
+    /// `Cause.items` is what the app's Cause tab and `ccop cause` list.
+    #[test]
+    fn each_cause_lists_its_calls_in_time_order_across_lanes() {
+        let error = json!({"type": "system", "subtype": "api_error", "timestamp": "2026-11-02T10:00:05Z", "content": "overloaded"});
+        let compact = json!({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-02T10:00:07Z",
+                             "compactMetadata": {"trigger": "auto", "preTokens": 100, "postTokens": 10, "durationMs": 0}});
+        let main = lane(
+            LaneReader::main(),
+            &[
+                prompt("00:00", "go"),                                              // 0
+                answer("00:01", "m1", 0, 0, 1, json!([tool("t1", "Bash", "ls")])), // 1, 2
+                result("00:03", "t1", "a", false),
+                answer("00:04", "m2", 0, 0, 2, json!([])),                          // 3
+                error,                                                              // 4: an API error is nothing new
+                answer("00:06", "m3", 0, 0, 3, json!([])),                          // 5: nothing new before it
+                compact,                                                            // 6
+                answer("00:08", "m4", 0, 0, 4, json!([{"type": "tool_use", "id": "t9", "input": {}}])), // 7, 8: a tool with no name
+            ],
+        );
+        let sub = lane(
+            LaneReader::subagent("a1", LaneMeta::default()),
+            &[
+                json!({"type": "user", "isSidechain": true, "timestamp": "2026-11-02T10:00:02Z", "message": {"content": "work"}}), // 0
+                answer("00:02", "s1", 0, 0, 5, json!([tool("u1", "Bash", "pwd")])),                                                 // 1, 2
+                result("00:03", "u1", "/p", false),
+                answer("00:09", "s2", 0, 0, 6, json!([])),                                                                          // 3
+            ],
+        );
+        let a = build("s", main, vec![sub]);
+        let items = |name: &str| -> Vec<(String, usize)> {
+            let c = a.spend.causes.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("no cause {name}"));
+            c.items.iter().map(|i| (i.lane.clone(), i.event)).collect()
+        };
+        assert_eq!(items("Your prompts"), [("main".to_string(), 0)]);
+        assert_eq!(items("Tasks from the lead"), [("a1".to_string(), 0)]);
+        assert_eq!(items("Bash"), [("main".to_string(), 2), ("a1".to_string(), 2)], "the same second: main first");
+        assert_eq!(items("Compaction"), [("main".to_string(), 6)]);
+        assert_eq!(items("Other"), [("main".to_string(), 5)]);
+        for c in &a.spend.causes {
+            let sum: u64 = c.items.iter().map(|i| i.cost_micros).sum();
+            assert!(sum.abs_diff(c.cost_micros) <= c.items.len() as u64 + 1, "{}: {sum} against {}", c.name, c.cost_micros);
+            if c.kind != CauseKind::Other {
+                assert_eq!(c.items.len() as u64, c.count, "{}", c.name);
+            }
+        }
+    }
 
     #[test]
     fn each_call_is_paid_by_what_made_it_run() {

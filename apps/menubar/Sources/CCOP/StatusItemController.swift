@@ -222,6 +222,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         refresh.target = self
         menu.addItem(refresh)
         menu.addItem(.separator())
+        let help = NSMenuItem(title: "Help", action: #selector(helpClicked), keyEquivalent: "")
+        help.target = self
+        menu.addItem(help)
+        let installCLI = NSMenuItem(title: "Install Command Line Tool…", action: #selector(installCLIClicked), keyEquivalent: "")
+        installCLI.target = self
+        menu.addItem(installCLI)
+        menu.addItem(.separator())
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(checkClicked), keyEquivalent: "")
         check.target = self
         menu.addItem(check)
@@ -249,6 +256,35 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     @objc private func openWindowClicked() { openWindow(session: nil, tab: nil) }
     @objc private func quitClicked() { NSApp.terminate(nil) }
     @objc private func autoClicked() { model.autoUpdate.toggle() }
+
+    @objc private func helpClicked() {
+        if !model.openHelp() {
+            alert("The help page is missing", "This build has no help page. scripts/build-app.sh makes it.", warning: true)
+        }
+    }
+
+    /// Links `ccop` into ~/.local/bin, and says what to do if a terminal will not find it there.
+    @objc private func installCLIClicked() {
+        let installer = CLIInstaller()
+        let link: URL
+        do {
+            link = try installer.install()
+        } catch {
+            alert("Could not install the command line tool", error.localizedDescription, warning: true)
+            return
+        }
+        Task { @MainActor in
+            let path = await Task.detached(priority: .userInitiated) { CLIInstaller.loginShellPath() }.value
+            if let path, installer.isOnPath(path) {
+                alert("ccop is installed", "\(link.path) now runs the ccop of this app. To give an agent its instructions, use Copy for Agent, or tell it to run `ccop guide`.")
+                return
+            }
+            let answer = alert("ccop is installed, but a terminal may not find it",
+                               "\(link.path) now runs the ccop of this app, but \(installer.binDir.path) is not on the PATH of your login shell. Run this line in a terminal, then open a new one:\n\n\(CLIInstaller.pathHint)",
+                               buttons: ["Copy the Line", "Close"])
+            if answer == .alertFirstButtonReturn { model.copy(CLIInstaller.pathHint) }
+        }
+    }
 
     @objc private func checkClicked() {
         Task { @MainActor in

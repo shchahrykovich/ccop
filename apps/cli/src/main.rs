@@ -2,12 +2,15 @@
 //! runs `ccop sessions --json`.
 
 mod anatomy;
+mod help_page;
 mod index;
+mod report;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
+use ccop_core::rollup::{By, What};
 use ccop_core::{Session, Usage, short};
 use chrono::{DateTime, Duration, Local, Utc};
 use clap::{Parser, Subcommand};
@@ -16,7 +19,12 @@ use serde::Serialize;
 use index::{Places, last_activity};
 
 #[derive(Parser)]
-#[command(name = "ccop", version, about = "Lists Claude Code sessions and their token usage")]
+#[command(
+    name = "ccop",
+    version,
+    about = "Lists Claude Code sessions and their token usage",
+    after_help = "An agent should run `ccop guide` first: it says which short reports to read."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -61,10 +69,66 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// A short report: cost, main causes, commands, subagents, turns, tips. One
+    /// session with ID (or the start of it), else all sessions of a period (7
+    /// days unless --since says otherwise). A good first command for an agent.
+    Brief {
+        id: Option<String>,
+        #[command(flatten)]
+        filter: Filter,
+        #[arg(long)]
+        json: bool,
+    },
+    /// A list, the most cost first: commands, causes, agents, sessions, turns,
+    /// errors, projects or tips. All sessions of a period (7 days unless
+    /// --since says otherwise), or one with --session.
+    Top {
+        #[arg(value_parser = What::parse)]
+        what: What,
+        /// Only this session. ID can be the start of a session id.
+        #[arg(long)]
+        session: Option<String>,
+        #[command(flatten)]
+        filter: Filter,
+        /// `cost` or `time`.
+        #[arg(long, value_parser = By::parse, default_value = "cost")]
+        by: By,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The costliest calls behind one cause of a session: a tool (`Bash`), a
+    /// program (`sed`), `prompts`, `tasks`, `compaction` or `other`.
+    Cause {
+        id: String,
+        name: String,
+        /// `cost` or `time`.
+        #[arg(long, value_parser = By::parse, default_value = "cost")]
+        by: By,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Where the clock went in one session: model, tools, subagents, waiting;
+    /// and the slowest calls and turns.
+    Time {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the instructions for agents.
+    Guide,
+    /// Print the help page as HTML (used by the app build).
+    #[command(hide = true)]
+    HelpPage,
     /// What one session did, and when: turns, model calls, tool calls and
-    /// subagents. ID can be the start of a session id.
+    /// subagents. ID can be the start of a session id. Long: an agent should
+    /// read `brief` first.
     Anatomy {
         id: String,
+        /// Print JSON (what the app reads). A long session gives megabytes.
         #[arg(long)]
         json: bool,
     },
@@ -82,8 +146,12 @@ enum Command {
     /// One tool call in full: its input and its whole output.
     Call {
         id: String,
-        /// The call's `tool_use_id` (in `anatomy --json`).
+        /// The call's `tool_use_id` (in `cause` or `anatomy --json`).
         tool_use_id: String,
+        /// Cut the output and each long text of the input at this size. An
+        /// output can be large: an agent should always give this.
+        #[arg(long)]
+        max_bytes: Option<usize>,
         #[arg(long)]
         json: bool,
     },
@@ -106,6 +174,10 @@ struct Filter {
 }
 
 impl Filter {
+    fn is_empty(&self) -> bool {
+        self.since.is_none() && self.project.is_none() && self.search.is_none() && !self.active
+    }
+
     fn keep(&self, s: &Session, now: DateTime<Utc>) -> bool {
         if let Some(p) = self.since
             && last_activity(s) < now - p
@@ -154,7 +226,32 @@ fn main() -> ExitCode {
     }
 }
 
+/// What a report covers: one session, or those of the filter (with no
+/// period: the last 7 days, so a report does not read every transcript).
+fn chosen<'a>(sessions: &'a [Session], id: Option<&str>, mut filter: Filter, now: DateTime<Utc>) -> Result<Vec<&'a Session>> {
+    if let Some(id) = id {
+        if !filter.is_empty() {
+            bail!("give one session or a filter (--since, --project, --search, --active), not both");
+        }
+        return Ok(vec![find(sessions, id)?]);
+    }
+    filter.since = filter.since.or(Some(Duration::days(7)));
+    Ok(sessions.iter().filter(|s| filter.keep(s, now)).collect())
+}
+
 fn run(cli: Cli) -> Result<()> {
+    // These two need no transcripts.
+    match &cli.command {
+        Command::Guide => {
+            print!("{}", ccop_core::help::guide());
+            return Ok(());
+        }
+        Command::HelpPage => {
+            print!("{}", help_page::render()?);
+            return Ok(());
+        }
+        _ => {}
+    }
     let now = Utc::now();
     let places = Places::from_env()?;
     let scan = index::scan(&places, now)?;
@@ -194,6 +291,52 @@ fn run(cli: Cli) -> Result<()> {
                 print_usage(&hours);
             }
         }
+        Command::Guide | Command::HelpPage => {}
+        Command::Brief { id, filter, json } => {
+            let list = chosen(&scan.sessions, id.as_deref(), filter, now)?;
+            let (rollup, unreadable) = anatomy::rollup(&list);
+            let brief = rollup.brief();
+            if json {
+                println!("{}", serde_json::to_string(&brief)?);
+            } else {
+                print!("{}", report::brief(&brief, id.is_some()));
+                report::note_unreadable(unreadable);
+            }
+        }
+        Command::Top { what, session, filter, by, limit, json } => {
+            let list = chosen(&scan.sessions, session.as_deref(), filter, now)?;
+            let (rollup, unreadable) = anatomy::rollup(&list);
+            let mut rows = rollup.rows(what, by);
+            let total = rows.len();
+            rows.truncate(limit);
+            if json {
+                println!("{}", serde_json::to_string(&report::TopOut { what, by, sessions: rollup.sessions, cost_micros: rollup.cost_micros, total_rows: total, rows })?);
+            } else {
+                print!("{}", report::top(what, by, &rollup, &rows, total));
+                report::note_unreadable(unreadable);
+            }
+        }
+        Command::Cause { id, name, by, limit, json } => {
+            let s = find(&scan.sessions, &id)?;
+            let a = anatomy::read(&s.id, std::path::Path::new(&s.transcript))?;
+            let cause = ccop_core::rollup::cause_report(&a, &name, by, limit)
+                .map_err(|names| anyhow::anyhow!("this session has no cause or program {name:?}; it has: {}", names.join(", ")))?;
+            if json {
+                println!("{}", serde_json::to_string(&cause)?);
+            } else {
+                print!("{}", report::cause(&s.id, &cause));
+            }
+        }
+        Command::Time { id, json } => {
+            let s = find(&scan.sessions, &id)?;
+            let a = anatomy::read(&s.id, std::path::Path::new(&s.transcript))?;
+            let timing = ccop_core::timing::analyze(&a);
+            if json {
+                println!("{}", serde_json::to_string(&timing)?);
+            } else {
+                print!("{}", report::time(&s.title, &timing));
+            }
+        }
         Command::Anatomy { id, json } => {
             let s = find(&scan.sessions, &id)?;
             let a = anatomy::read(&s.id, std::path::Path::new(&s.transcript))?;
@@ -222,9 +365,12 @@ fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Command::Call { id, tool_use_id, json } => {
+        Command::Call { id, tool_use_id, max_bytes, json } => {
             let s = find(&scan.sessions, &id)?;
-            let call = anatomy::call(std::path::Path::new(&s.transcript), &tool_use_id)?;
+            let mut call = anatomy::call(std::path::Path::new(&s.transcript), &tool_use_id)?;
+            if let Some(max) = max_bytes {
+                call.limit(max);
+            }
             if json {
                 println!("{}", serde_json::to_string(&call)?);
             } else {
@@ -232,6 +378,9 @@ fn run(cli: Cli) -> Result<()> {
                 println!("input: {}", serde_json::to_string_pretty(&call.input)?);
                 println!("output ({} bytes{}):", call.output_bytes, if call.is_error { ", error" } else { "" });
                 println!("{}", call.output.as_deref().unwrap_or("(no result yet)"));
+                if call.output_truncated {
+                    println!("(cut: this is the start of the output)");
+                }
             }
         }
         Command::Show { id, json } => {

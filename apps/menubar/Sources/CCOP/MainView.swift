@@ -63,6 +63,7 @@ struct SessionListView: View {
                                         SessionRow(session: s, now: model.now,
                                                    select: { select(s.id) },
                                                    openWindow: { model.openWindow?(s.id, .overview) })
+                                        .contextMenu { Button("Copy for Agent") { model.copyForAgent(s) } }
                                     }
                                 }
                             } header: {
@@ -137,6 +138,7 @@ struct SidebarView: View {
                                 SidebarRow(session: s, now: model.now, selected: s.id == selectedID)
                                     .contentShape(Rectangle())
                                     .onTapGesture { select(s.id) }
+                                    .contextMenu { Button("Copy for Agent") { model.copyForAgent(s) } }
                             }
                         }
                     }

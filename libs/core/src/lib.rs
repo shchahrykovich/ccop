@@ -4,9 +4,12 @@
 pub mod anatomy;
 pub mod call;
 pub mod context;
+pub mod help;
 pub mod pricing;
+pub mod rollup;
 pub mod session;
 pub mod spend;
+pub mod timing;
 pub mod transcript;
 pub mod usage;
 

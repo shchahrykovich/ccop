@@ -190,3 +190,195 @@ fn usage_gives_hourly_tokens_and_cost_for_main_files_and_subagents() {
     assert_eq!(cost, 458 + 329);
     assert!(hours.windows(2).all(|w| w[0]["start"].as_str() < w[1]["start"].as_str()));
 }
+
+/// A session with two `sed` calls, a failing `ls`, and a subagent.
+fn session_with_tools(h: &Home, id: &str, project: &str, at: &str) {
+    let time = |t: &str| format!("{at}T{t}Z");
+    let call = |id: &str, command: &str| json!({"type": "tool_use", "id": id, "name": "Bash", "input": {"command": command, "description": command}});
+    let said = |msg: &str, out: u64, t: &str, blocks: Value| {
+        json!({"type": "assistant", "requestId": format!("r{msg}"), "timestamp": time(t),
+               "message": {"id": msg, "model": "claude-opus-5-5", "content": blocks,
+                           "usage": {"input_tokens": 1, "cache_read_input_tokens": 100, "output_tokens": out}}})
+        .to_string()
+            + "\n"
+    };
+    let done = |use_id: &str, text: &str, error: bool, t: &str| {
+        json!({"type": "user", "timestamp": time(t),
+               "message": {"content": [{"type": "tool_result", "tool_use_id": use_id, "content": text, "is_error": error}]}})
+        .to_string()
+            + "\n"
+    };
+    let main = h.file(&format!("-made-up-{project}/{id}.jsonl"));
+    append(&main, &json!({"type": "user", "cwd": format!("/made/up/{project}"), "timestamp": time("10:00:00"), "message": {"content": "fix the cart"}}).to_string());
+    append(&main, "\n");
+    append(&main, &said(&format!("{id}m1"), 10, "10:00:10", json!([call("t1", "sed -n 1,9p a.md")])));
+    append(&main, &done("t1", &"line of the file\n".repeat(1000), false, "10:00:12"));
+    append(&main, &said(&format!("{id}m2"), 20, "10:00:15", json!([call("t2", "sed -n 9,20p a.md")])));
+    append(&main, &done("t2", "short", false, "10:00:16"));
+    append(&main, &said(&format!("{id}m3"), 30, "10:00:20", json!([call("t3", "ls /nothing")])));
+    append(&main, &done("t3", "ls: /nothing: No such file or directory", true, "10:00:25"));
+    append(&main, &said(&format!("{id}m4"), 40, "10:00:30", json!([])));
+    let sub = h.file(&format!("-made-up-{project}/{id}/subagents/agent-a1.jsonl"));
+    append(&sub, &json!({"type": "user", "isSidechain": true, "timestamp": time("10:00:11"), "message": {"content": "check prices"}}).to_string());
+    append(&sub, "\n");
+    append(&sub, &said(&format!("{id}s1"), 100, "10:00:40", json!([])));
+    append(&h.file(&format!("-made-up-{project}/{id}/subagents/agent-a1.meta.json")), &json!({"agentType": "reviewer", "description": "Check prices"}).to_string());
+}
+
+fn json_of(h: &Home, args: &[&str]) -> Value {
+    let (ok, out, err) = h.ccop(args);
+    assert!(ok, "{args:?}: {err}");
+    serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out}"))
+}
+
+fn today() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+#[test]
+fn a_brief_of_one_session_says_what_cost_most_and_how_to_go_further() {
+    let h = Home::new();
+    session_with_tools(&h, "aaaa1111", "shop", &today());
+    let (ok, out, err) = h.ccop(&["brief", "aaaa"]);
+    assert!(ok, "{err}");
+    assert!(out.contains("aaaa1111") && out.contains("shop"), "{out}");
+    assert!(out.contains("WHAT MADE THE MODEL RUN") && out.contains("sed") && out.contains("Check prices"), "{out}");
+    assert!(out.contains("ccop cause aaaa1111 NAME"), "{out}");
+    assert!(out.len() < 2048, "{} bytes", out.len());
+
+    let b = json_of(&h, &["brief", "aaaa", "--json"]);
+    assert_eq!(b["session_id"], "aaaa1111");
+    assert_eq!((b["sessions"].as_u64(), b["tool_calls"].as_u64(), b["errors"].as_u64(), b["subagents"].as_u64()), (Some(1), Some(3), Some(1), Some(1)));
+}
+
+#[test]
+fn a_brief_and_a_top_of_a_period_add_up_the_sessions_of_that_period() {
+    let h = Home::new();
+    session_with_tools(&h, "aaaa1111", "shop", &today());
+    session_with_tools(&h, "bbbb2222", "farm", &today());
+    session_with_tools(&h, "cccc3333", "shop", "2020-01-01");
+
+    // With no period: the last 7 days.
+    let b = json_of(&h, &["brief", "--json"]);
+    assert_eq!(b["sessions"], 2);
+    assert_eq!(b["session_id"], Value::Null);
+    let (ok, out, _) = h.ccop(&["brief"]);
+    assert!(ok);
+    assert!(out.contains("aaaa1111") && out.contains("bbbb2222"), "the next command needs the ids: {out}");
+
+    let only_shop = json_of(&h, &["brief", "--project", "shop", "--json"]);
+    assert_eq!(only_shop["sessions"], 1);
+    let all_time = json_of(&h, &["brief", "--since", "5000w", "--json"]);
+    assert_eq!(all_time["sessions"], 3);
+
+    let top = json_of(&h, &["top", "commands", "--json", "--limit", "1"]);
+    assert_eq!((top["sessions"].as_u64(), top["total_rows"].as_u64()), (Some(2), Some(2)));
+    let rows = top["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["name"], "sed");
+    assert_eq!((rows[0]["count"].as_u64(), rows[0]["sessions"].as_u64()), (Some(4), Some(2)));
+
+    let by_time = json_of(&h, &["top", "commands", "--by", "time", "--session", "aaaa", "--json"]);
+    assert_eq!(by_time["rows"][0]["name"], "ls", "ls took 5 s, the sed calls 3 s");
+
+    for what in ["commands", "causes", "agents", "sessions", "turns", "errors", "projects", "tips"] {
+        let (ok, out, err) = h.ccop(&["top", what]);
+        assert!(ok, "{what}: {err}");
+        assert!(out.contains("2 sessions"), "{what}: {out}");
+    }
+    let (ok, _, err) = h.ccop(&["top", "nothing"]);
+    assert!(!ok);
+    assert!(err.contains("commands, causes"), "{err}");
+}
+
+#[test]
+fn one_session_and_a_filter_together_are_refused() {
+    let h = Home::new();
+    session_with_tools(&h, "aaaa1111", "shop", &today());
+    let (ok, _, err) = h.ccop(&["brief", "aaaa", "--since", "7d"]);
+    assert!(!ok);
+    assert!(err.contains("not both"), "{err}");
+    let (ok, _, err) = h.ccop(&["top", "commands", "--session", "aaaa", "--project", "shop"]);
+    assert!(!ok);
+    assert!(err.contains("not both"), "{err}");
+}
+
+#[test]
+fn a_cause_lists_the_calls_that_a_call_can_then_show_cut() {
+    let h = Home::new();
+    session_with_tools(&h, "aaaa1111", "shop", &today());
+    let c = json_of(&h, &["cause", "aaaa", "sed", "--json", "--limit", "1"]);
+    assert_eq!((c["name"].as_str(), c["total_calls"].as_u64(), c["calls"].as_array().unwrap().len()), (Some("sed"), Some(2), 1));
+    let (ok, text, _) = h.ccop(&["cause", "aaaa", "bash"]);
+    assert!(ok);
+    assert!(text.contains("t3") && text.contains("ERROR"), "{text}");
+    assert!(text.contains("ccop call aaaa1111 TOOL_USE_ID --max-bytes"), "{text}");
+    let (ok, _, err) = h.ccop(&["cause", "aaaa", "Grep"]);
+    assert!(!ok);
+    assert!(err.contains("Bash") && err.contains("sed"), "{err}");
+
+    let whole = json_of(&h, &["call", "aaaa", "t1", "--json"]);
+    assert_eq!(whole["output_truncated"], false);
+    assert_eq!(whole["output"].as_str().unwrap().len(), 17_000);
+    let cut = json_of(&h, &["call", "aaaa", "t1", "--json", "--max-bytes", "100"]);
+    assert_eq!(cut["output"].as_str().unwrap().len(), 100);
+    assert_eq!((cut["output_truncated"].as_bool(), cut["output_bytes"].as_u64()), (Some(true), Some(17_000)));
+    let (ok, text, _) = h.ccop(&["call", "aaaa", "t1", "--max-bytes", "100"]);
+    assert!(ok);
+    assert!(text.contains("(cut: this is the start of the output)") && text.contains("17000 bytes"), "{text}");
+}
+
+#[test]
+fn time_splits_the_clock_into_parts_that_add_up() {
+    let h = Home::new();
+    session_with_tools(&h, "aaaa1111", "shop", &today());
+    let t = json_of(&h, &["time", "aaaa", "--json"]);
+    let n = |k: &str| t[k].as_u64().unwrap();
+    assert_eq!(n("wall_ms"), 40_000);
+    assert_eq!(n("model_ms") + n("tools_ms") + n("subagents_ms") + n("waiting_ms"), 40_000);
+    assert_eq!(n("tools_ms"), 8_000);
+    assert_eq!(t["slowest"][0]["lane"], "a1", "the subagent's call took 29 s");
+    let (ok, text, _) = h.ccop(&["time", "aaaa"]);
+    assert!(ok);
+    assert!(text.contains("CLOCK") && text.contains("SLOWEST CALLS"), "{text}");
+}
+
+#[test]
+fn the_guide_needs_no_transcripts_and_names_only_real_commands() {
+    let out = Command::new(env!("CARGO_BIN_EXE_ccop"))
+        .arg("guide")
+        .env("CCOP_PROJECTS_DIR", "/made/up/nowhere")
+        .env("CCOP_CACHE_DIR", "/made/up/nowhere")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let guide = String::from_utf8(out.stdout).unwrap();
+    assert!(guide.len() <= ccop_core::help::GUIDE_MAX_BYTES);
+    let h = Home::new();
+    let mut seen = 0;
+    for part in guide.split('`').skip(1).step_by(2) {
+        let Some(rest) = part.strip_prefix("ccop ") else { continue };
+        let sub = rest.split_whitespace().next().unwrap();
+        let (ok, _, err) = h.ccop(&[sub, "--help"]);
+        assert!(ok, "the guide names `{sub}`: {err}");
+        seen += 1;
+    }
+    assert!(seen >= 6, "only {seen} commands found in the guide");
+}
+
+#[test]
+fn the_top_level_help_points_an_agent_at_the_guide() {
+    let h = Home::new();
+    let (ok, out, _) = h.ccop(&["--help"]);
+    assert!(ok);
+    assert!(out.contains("ccop guide"), "{out}");
+    assert!(!out.contains("help-page"), "a hidden command: {out}");
+}
+
+#[test]
+fn the_help_page_is_html_with_the_guide_to_copy() {
+    let h = Home::new();
+    let (ok, out, err) = h.ccop(&["help-page"]);
+    assert!(ok, "{err}");
+    assert!(out.starts_with("<!doctype html>") && out.contains("Copy for Agent"), "{}", &out[..80]);
+}
