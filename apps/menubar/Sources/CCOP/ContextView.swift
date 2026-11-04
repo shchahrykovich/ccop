@@ -33,7 +33,9 @@ private enum Ink {
 struct ContextView: View {
     let anatomy: Anatomy
     @State private var laneID = "main"
-    @State private var selectedCall: Int?
+    /// The call under the pointer and the call chosen with a click. With
+    /// neither, the last call shows.
+    @State private var pick = ChartPick()
     @State private var width: CGFloat = 1000
 
     /// The chart column's and the side panel's flex basis, and the gap between
@@ -51,16 +53,16 @@ struct ContextView: View {
                 TokenTimeline(anatomy: anatomy)
                 header(lanes, current: lane)
                 if let lane, !lane.context.isEmpty {
-                    let index = min(max((selectedCall ?? lane.context.count) - 1, 0), lane.context.count - 1)
+                    let index = min(max(pick.shown(or: lane.context.count) - 1, 0), lane.context.count - 1)
                     let free = width - Self.chartBasis - Self.gap - Self.asideBasis
                     let wide = free >= 0
                     // As `flex: 999 1 460px` beside `flex: 1 1 240px`: the panel gets 1/1000 of the free width.
                     let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: Self.gap))
                         : AnyLayout(VStackLayout(alignment: .leading, spacing: Self.gap))
                     layout {
-                        ContextChart(lane: lane, selectedCall: $selectedCall, shownCall: index + 1)
+                        ContextChart(lane: lane, pick: $pick, shownCall: index + 1)
                             .frame(maxWidth: .infinity)
-                        ContextBreakdown(lane: lane, point: lane.context[index], call: index + 1)
+                        ContextBreakdown(lane: lane, point: lane.context[index], call: index + 1, pinned: pick.pinned != nil)
                             .frame(width: wide ? Self.asideBasis + free / 1000 : nil)
                             .frame(maxWidth: wide ? nil : .infinity)
                     }
@@ -78,7 +80,7 @@ struct ContextView: View {
             .padding(.top, 18)
             .padding(.bottom, 24)
         }
-        .onChange(of: laneID) { selectedCall = nil }
+        .onChange(of: laneID) { pick = ChartPick() }
     }
 
     private func header(_ lanes: [AnatomyLane], current: AnatomyLane?) -> some View {
@@ -253,8 +255,8 @@ private final class MenuTarget: NSObject {
 
 struct ContextChart: View {
     let lane: AnatomyLane
-    @Binding var selectedCall: Int?
-    /// The call shown in the side panel: the selected one, or the last.
+    @Binding var pick: ChartPick
+    /// The call shown in the side panel: the chosen one, or the last.
     let shownCall: Int
 
     private static let height: CGFloat = 300
@@ -313,21 +315,25 @@ struct ContextChart: View {
                 .chartYAxis(.hidden)
                 .chartXScale(domain: 1 ... max(count, 2))
                 .chartYScale(domain: 0 ... top)
-                .chartXSelection(value: $selectedCall)
                 .chartOverlay { proxy in
-                    GeometryReader { geo in
-                        if let plot = proxy.plotFrame.map({ geo[$0] }) {
-                            let xs = compactions.compactMap { proxy.position(forX: $0).map { plot.minX + $0 } }
-                            ForEach(Array(Self.labelled(xs).enumerated()), id: \.offset) { _, mark in
-                                compactionMark(x: mark.x, labelled: mark.labelled, plot: plot)
-                            }
-                            if let x = proxy.position(forX: shownIndex + 1),
-                               let y = proxy.position(forY: Double(lane.context[shownIndex].total)) {
-                                selectionMark(x: plot.minX + x, y: plot.minY + y, plot: plot)
+                    ZStack {
+                        GeometryReader { geo in
+                            if let plot = proxy.plotFrame.map({ geo[$0] }) {
+                                let xs = compactions.compactMap { proxy.position(forX: $0).map { plot.minX + $0 } }
+                                ForEach(Array(Self.labelled(xs).enumerated()), id: \.offset) { _, mark in
+                                    compactionMark(x: mark.x, labelled: mark.labelled, plot: plot)
+                                }
+                                if let x = proxy.position(forX: shownIndex + 1),
+                                   let y = proxy.position(forY: Double(lane.context[shownIndex].total)) {
+                                    selectionMark(x: plot.minX + x, y: plot.minY + y, plot: plot)
+                                }
                             }
                         }
+                        .allowsHitTesting(false)
+                        ChartPicker(proxy: proxy, pick: $pick) { x in
+                            proxy.value(atX: x, as: Int.self).map { min(max($0, 1), count) }
+                        }
                     }
-                    .allowsHitTesting(false)
                 }
                 .padding(.leading, Self.gutter)
             }
@@ -436,14 +442,20 @@ struct ContextChart: View {
 
 /// The parts of one call's context, top of the stack first, on a side panel.
 struct ContextBreakdown: View {
+    @Environment(AppModel.self) private var model
     let lane: AnatomyLane
     let point: ContextPoint
     let call: Int
+    /// The call was chosen with a click, so it stays when the pointer leaves.
+    let pinned: Bool
 
     var body: some View {
         let main = lane.id == "main"
         let sums = ContextColors.sums(point)
-        let rows = ContextColors.stack.reversed().filter { (sums[$0] ?? 0) > 0 }
+        // Every part of the lane, also at 0, so the panel and the page below
+        // it keep their place from call to call.
+        let present = ContextColors.present(lane.context)
+        let rows = ContextColors.stack.reversed().filter { present.contains($0) }
         let shape = RoundedRectangle(cornerRadius: 10)
         VStack(alignment: .leading, spacing: 8) {
             Text("Call \(call) of \(lane.context.count) · \(point.at.formatted(date: .omitted, time: .standard))")
@@ -469,11 +481,17 @@ struct ContextBreakdown: View {
                 }
             }
             .padding(.top, 4)
-            Text("Click or drag on the chart to choose a call.")
+            Button("Go to Chat") { model.openInChat(ChatPlace(lane: lane.id, event: point.event)) }
+                .controlSize(.small)
+                .help("Show this model call in the Chat tab")
+                .padding(.top, 2)
+            Text(pinned ? "This call stays here. Click another call to change it, or this call to let it go."
+                : "Click or drag on the chart to keep a call here.")
                 .font(.system(size: 11))
                 .foregroundStyle(Ink.text3)
                 .lineSpacing(2.4)
                 .padding(.vertical, 1.2)
+                .lineLimit(2, reservesSpace: true)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
         }
@@ -497,49 +515,77 @@ struct ContextBreakdown: View {
     }
 }
 
-/// The prompts and tool calls that added the most tokens to a context.
+/// The prompts and tool calls that added the most tokens to a context. A click
+/// on a row shows the call in full; a prompt has no call, so it opens in Chat.
 struct Contributors: View {
+    @Environment(AppModel.self) private var model
     let anatomy: Anatomy
+    @State private var shownCall: CallRef?
 
     var body: some View {
+        let rows = anatomy.contributors.compactMap { c -> Line? in
+            guard let lane = anatomy.lane(c.lane), lane.events.indices.contains(c.event) else { return nil }
+            return Line(contributor: c, lane: lane, event: lane.events[c.event], where_: where_(lane, c.event))
+        }
+        let widths = Widths(rows)
         VStack(alignment: .leading, spacing: 6) {
             Text("Largest additions to the context").font(.system(size: 13, weight: .semibold))
             Text("Each one stays in every later call of its lane until a compaction, so it is read again on each call.")
                 .font(.system(size: 12)).foregroundStyle(Ink.text3)
                 .fixedSize(horizontal: false, vertical: true)
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                ForEach(Array(anatomy.contributors.enumerated()), id: \.offset) { _, c in
-                    if let lane = anatomy.lane(c.lane), lane.events.indices.contains(c.event) {
-                        let e = lane.events[c.event]
-                        Rectangle().fill(Ink.line2).frame(height: 1)
-                        GridRow {
-                            Text("+\(Format.tokens(c.tokens))").fontWeight(.semibold)
-                                .frame(minWidth: 64, alignment: .leading)
-                            HStack(spacing: 6) {
-                                RoundedRectangle(cornerRadius: 2).fill(color(e)).frame(width: 8, height: 8)
-                                Text(e.label).lineLimit(1).fixedSize()
-                            }
-                            .frame(minWidth: 70, alignment: .leading)
-                            Text(e.command ?? e.text ?? "")
-                                .font(.system(size: 11.5, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(where_(lane, c.event))
-                                .foregroundStyle(Ink.text3)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.leading, 12)
-                                .gridColumnAlignment(.trailing)
-                        }
-                        .padding(.vertical, 7)
-                        .help("\(lane.name) · \(e.start.formatted(date: .omitted, time: .standard))")
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Rectangle().fill(Ink.line2).frame(height: 1)
+                    ContributorRow(line: row, widths: widths, color: color(row.event), action: { open(row) })
+                        .rowMenu(view: row.event.hasFullCall ? { open(row) } : nil,
+                                 goTo: { model.openInChat(row.place) },
+                                 fileName: RowExport.fileName(sessionID: anatomy.sessionId, name: "\(row.event.label) \(row.event.text ?? "")"),
+                                 json: { try RowExport.encode(await model.callExport(sessionID: anatomy.sessionId, lane: row.lane, event: row.contributor.event)) })
                 }
             }
             .font(.system(size: 12.5))
             .monospacedDigit()
             .padding(.top, 4)
+        }
+        .sheet(item: $shownCall) { ref in
+            if let lane = anatomy.lane(ref.lane), lane.events.indices.contains(ref.index) {
+                CallSheet(sessionID: anatomy.sessionId, lane: lane, index: ref.index)
+            }
+        }
+    }
+
+    private func open(_ row: Line) {
+        if row.event.hasFullCall {
+            shownCall = CallRef(lane: row.lane.id, index: row.contributor.event)
+        } else {
+            model.openInChat(row.place)
+        }
+    }
+
+    /// One row's values.
+    fileprivate struct Line {
+        var contributor: Contributor
+        var lane: AnatomyLane
+        var event: AnatomyEvent
+        var where_: String
+        var tokens: String { "+\(Format.tokens(contributor.tokens))" }
+        var place: ChatPlace { ChatPlace(lane: lane.id, event: contributor.event) }
+    }
+
+    /// The columns' widths, so that they line up from row to row.
+    fileprivate struct Widths {
+        var tokens: CGFloat = 64
+        var label: CGFloat = 70
+        var where_: CGFloat = 0
+
+        init(_ rows: [Line]) {
+            let bold = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .semibold)
+            let plain = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .regular)
+            for row in rows {
+                tokens = max(tokens, textWidth(row.tokens, bold))
+                label = max(label, textWidth(row.event.label, plain) + 14)
+                where_ = max(where_, textWidth(row.where_, plain))
+            }
         }
     }
 
@@ -566,9 +612,66 @@ struct Contributors: View {
     }
 }
 
+/// One row of `Contributors`. The whole row lights up under the pointer, to
+/// show that a click opens it.
+private struct ContributorRow: View {
+    let line: Contributors.Line
+    let widths: Contributors.Widths
+    let color: Color
+    let action: () -> Void
+    @State private var hovering = false
+
+    /// How far the highlight reaches past the text.
+    private static let inset: CGFloat = 6
+
+    var body: some View {
+        let e = line.event
+        HStack(spacing: 0) {
+            Text(line.tokens).fontWeight(.semibold)
+                .frame(width: widths.tokens, alignment: .leading)
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 8, height: 8)
+                Text(e.label).lineLimit(1).fixedSize()
+            }
+            .frame(width: widths.label, alignment: .leading)
+            Text(e.command ?? e.text ?? "")
+                .font(.system(size: 11.5, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(line.where_)
+                .foregroundStyle(Ink.text3)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: widths.where_, alignment: .trailing)
+                .padding(.leading, 12)
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, Self.inset)
+        .background(hovering ? Ink.soft : .clear, in: RoundedRectangle(cornerRadius: 4))
+        .padding(.horizontal, -Self.inset)
+        .contentShape(Rectangle())
+        .help("\(line.lane.name) · \(e.start.formatted(date: .omitted, time: .standard))")
+        .onHover { inside in
+            guard inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        // The tab can change under the pointer: a prompt row opens Chat.
+        .onDisappear {
+            if hovering { NSCursor.pop() }
+            hovering = false
+        }
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(e.hasFullCall ? "Shows this call in full" : "Shows this prompt in Chat")
+    }
+}
+
 /// Lays its children out in rows, wrapping to a new row when one is full, as
 /// `display: flex; flex-wrap: wrap; align-items: center` with a gap.
-private struct FlowRows: Layout {
+struct FlowRows: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
 

@@ -413,14 +413,15 @@ private struct TipCard: View {
 
 /// What made the model run, the most cost first, as bars relative to the biggest cause.
 struct CauseTable: View {
+    @Environment(AppModel.self) private var model
     let spend: Spend
 
     var body: some View {
-        let causes = spend.causes.filter { $0.costMicros > 0 || $0.count > 0 }.sorted { $0.costMicros > $1.costMicros }
+        let causes = spend.shownCauses
         let top = max(1, causes.first?.costMicros ?? 1)
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "By cause")
-                .help("After a tool result the model runs again and reads the whole context. A call after several results counts a part for each. Point at a row for its numbers.")
+                .help("After a tool result the model runs again and reads the whole context. A call after several results counts a part for each. Point at a row for its numbers; click it to see each call.")
             ForEach(causes) { c in
                 let look = look(c)
                 // grid-template-columns: 24px 112px 1fr 52px; gap: 10px
@@ -431,7 +432,7 @@ struct CauseTable: View {
                         .frame(width: 24, height: 24)
                         .background(look.tile, in: RoundedRectangle(cornerRadius: 6))
                         .accessibilityHidden(true)
-                    Text(label(c)).lineLimit(1).frame(width: 112, alignment: .leading)
+                    Text(c.title).lineLimit(1).frame(width: 112, alignment: .leading)
                     GeometryReader { g in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4).fill(SpendStyle.track)
@@ -445,19 +446,13 @@ struct CauseTable: View {
                 }
                 .font(.system(size: SpendStyle.row))
                 .monospacedDigit()
-                .contentShape(Rectangle())
                 .help(help(c))
+                .clickableRow {
+                    model.causeID = c.id
+                    model.windowTab = .cause
+                }
+                .accessibilityHint("Shows each call of this cause")
             }
-        }
-    }
-
-    private func label(_ c: Cause) -> String {
-        switch c.kind {
-        case .tool: "\(c.name) results"
-        case .prompt: "Your messages"
-        case .task: "Subagent tasks"
-        case .compact: "Compaction"
-        case .other: "Start"
         }
     }
 
@@ -571,6 +566,7 @@ struct PromptCosts: View {
 /// Bash calls by the program they ran. A row opens the list of its calls;
 /// a call opens its input, output and consumption.
 struct CommandTable: View {
+    @Environment(AppModel.self) private var model
     let session: Session
     let anatomy: Anatomy
     @State private var showAll = false
@@ -623,13 +619,15 @@ struct CommandTable: View {
                     .contentShape(Rectangle())
                     .help(help(g))
                     .onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
-                    .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            if isOpen { open.remove(g.group) } else { open.insert(g.group) }
-                        }
-                    }
+                    .onTapGesture { toggle(g) }
                     .accessibilityAddTraits(.isButton)
                     .accessibilityValue(isOpen ? "Open" : "Closed")
+                    .rowMenu(view: { toggle(g) },
+                             goTo: g.items.first.map { first in
+                                 { model.openInChat(ChatPlace(lane: first.lane, event: first.event)) }
+                             },
+                             fileName: RowExport.fileName(sessionID: session.id, name: "bash \(g.group)"),
+                             json: { try RowExport.encode(RowExport.program(g, in: anatomy)) })
                     if isOpen {
                         CallList(anatomy: anatomy, items: g.items, shownCall: $shownCall)
                             .padding(.bottom, 6)
@@ -644,6 +642,12 @@ struct CommandTable: View {
             if let lane = anatomy.lane(ref.lane), lane.events.indices.contains(ref.index) {
                 CallSheet(sessionID: session.id, lane: lane, index: ref.index)
             }
+        }
+    }
+
+    private func toggle(_ g: CCOPKit.CommandGroup) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            if open.contains(g.group) { open.remove(g.group) } else { open.insert(g.group) }
         }
     }
 
@@ -722,6 +726,7 @@ private struct AutoColumns: Layout {
 
 /// The calls of one program: when, which agent, the command, and what each one cost.
 struct CallList: View {
+    @Environment(AppModel.self) private var model
     let anatomy: Anatomy
     let items: [CallCost]
     @Binding var shownCall: CallRef?
@@ -735,7 +740,7 @@ struct CallList: View {
                 item: item,
                 time: e.start.formatted(date: .omitted, time: .standard),
                 agent: lane.name,
-                command: e.command ?? e.text ?? "",
+                command: e.command ?? e.text ?? e.label,
                 isError: e.isError,
                 output: e.resultBytes.map { Format.bytes($0) } ?? "",
                 added: e.addedTokens.map { Format.tokens($0) } ?? "",
@@ -751,7 +756,7 @@ struct CallList: View {
                 Segmented(options: [(false, "By time"), (true, "By cost")], selection: $byCost, height: 20)
                     .frame(width: 160)
             }
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 CallRow.columns(widths) {
                     ColumnTitle("Time")
                     ColumnTitle("Agent")
@@ -763,13 +768,34 @@ struct CallList: View {
                 .padding(.horizontal, CallRow.inset)
                 .padding(.bottom, 3)
                 ForEach(rows, id: \.item) { row in
-                    CallRow(values: row, widths: widths) { shownCall = CallRef(lane: row.item.lane, index: row.item.event) }
+                    let item = row.item
+                    let event = anatomy.lane(item.lane)?.events[item.event]
+                    CallRow(values: row, widths: widths) { open(item, full: event?.hasFullCall == true) }
+                        .rowMenu(view: event?.hasFullCall == true ? { open(item, full: true) } : nil,
+                                 goTo: { model.openInChat(ChatPlace(lane: item.lane, event: item.event)) },
+                                 fileName: RowExport.fileName(sessionID: anatomy.sessionId, name: "\(event?.label ?? "call") \(row.time)"),
+                                 json: {
+                                     guard let lane = anatomy.lane(item.lane) else { throw CocoaError(.fileNoSuchFile) }
+                                     return try RowExport.encode(await model.callExport(sessionID: anatomy.sessionId, lane: lane, event: item.event))
+                                 })
                 }
             }
         }
         .padding(10)
         .background(SpendStyle.soft, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(SpendStyle.line2))
+    }
+}
+
+extension CallList {
+    /// A tool call opens in the call sheet. A prompt or a model call has no
+    /// such sheet, so it opens in Chat.
+    fileprivate func open(_ item: CallCost, full: Bool) {
+        if full {
+            shownCall = CallRef(lane: item.lane, index: item.event)
+        } else {
+            model.openInChat(ChatPlace(lane: item.lane, event: item.event))
+        }
     }
 }
 

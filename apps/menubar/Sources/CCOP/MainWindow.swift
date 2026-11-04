@@ -110,7 +110,7 @@ struct WindowDetail: View {
             switch model.windowTab {
             case .overview:
                 SessionDetailView(session: session, inWindow: true)
-            case .spend, .chat, .anatomy, .context:
+            case .spend, .cause, .chat, .anatomy, .context:
                 AnatomyLoader(session: session, tab: model.windowTab)
             }
         }
@@ -129,9 +129,11 @@ struct AnatomyLoader: View {
             case let .loaded(a, _):
                 switch tab {
                 case .spend: SpendView(session: session, anatomy: a)
+                case .cause: CauseView(anatomy: a)
                 case .chat: ChatView(session: session, anatomy: a)
                 case .anatomy: AnatomyView(session: session, anatomy: a)
-                default: ContextView(anatomy: a)
+                // A new session starts with nothing chosen on the charts.
+                default: ContextView(anatomy: a).id(session.id)
                 }
             case let .failed(why):
                 VStack(spacing: 8) {

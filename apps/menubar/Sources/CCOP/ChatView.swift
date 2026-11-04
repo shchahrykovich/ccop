@@ -70,11 +70,15 @@ struct ChatView: View {
     @State private var openTools: Set<Int> = []
     @State private var expandAll = false
     @State private var filter = ChatFilter()
+    /// The event the user came to from another tab or the call sheet: it has a
+    /// mark. `jumps` counts the times, so the same event can be gone to again.
+    @State private var jumpedTo: Int?
+    @State private var jumps = 0
 
     var body: some View {
         let lane = anatomy.lane(laneID) ?? anatomy.lanes[0]
         // A ScrollView at the root, as in the other tabs; the filter bar stays at the top.
-        PageScrollView {
+        PageScrollView(withProxy: { proxy in
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 Section {
                     switch chat {
@@ -91,14 +95,27 @@ struct ChatView: View {
                     filterBar(lane)
                 }
             }
-        }
+            .task(id: jumps) {
+                guard let jumpedTo else { return }
+                // A lazy stack guesses the height of rows it has not built, so
+                // the first scroll can land short; the next ones correct it.
+                for wait in [50, 150, 300] {
+                    try? await Task.sleep(for: .milliseconds(wait))
+                    if Task.isCancelled { return }
+                    proxy.scrollTo(jumpedTo, anchor: .center)
+                }
+            }
+        })
         .task(id: "\(lane.id) \(lane.events.count)") {
             if case .loaded = chat {} else { chat = .loading }
             switch await model.chat(session.id, lane: lane.id) {
-            case let .success(c): chat = .loaded(c)
+            case let .success(c):
+                chat = .loaded(c)
+                goToTarget(lane)
             case let .failure(e): chat = .failed(e.localizedDescription)
             }
         }
+        .onChange(of: model.chatTarget) { goToTarget(lane) }
         .onChange(of: laneID) {
             chat = .loading
             openTools = []
@@ -108,6 +125,17 @@ struct ChatView: View {
                 CallSheet(sessionID: session.id, lane: l, index: ref.index)
             }
         }
+    }
+
+    /// Takes the place another view asked for: shows its row and scrolls to it.
+    private func goToTarget(_ lane: AnatomyLane) {
+        guard case .loaded = chat, let target = model.chatTarget else { return }
+        model.chatTarget = nil
+        guard target.lane == lane.id, lane.events.indices.contains(target.event) else { return }
+        filter = filter.showing(target.event, in: lane.events)
+        if lane.events[target.event].kind == .tool { openTools.insert(target.event) }
+        jumpedTo = target.event
+        jumps += 1
     }
 
     // MARK: - Filter bar
@@ -201,20 +229,29 @@ struct ChatView: View {
             let e = lane.events[i]
             let previous = pos > 0 ? lane.events[shown[pos - 1]].kind : nil
             let first = pos == 0
-            switch e.kind {
-            case .prompt:
-                promptView(lane, e, texts[i], number: prompts[i] ?? 0, first: first)
-            case .answer:
-                // An answer after a prompt (or at the top) starts Claude's block with
-                // the avatar; the next answers of the same block show only their line.
-                let starts = previous == nil || previous == .prompt || previous == .compact || previous == .error
-                answerView(e, texts[i], startsBlock: starts, first: first)
-            case .tool:
-                toolView(lane, i, e, texts[i], first: first)
-            case .compact:
-                marker(e.text ?? "Compacted", first: first)
-            case .error:
-                marker(e.text ?? "API error", first: first)
+            Group {
+                switch e.kind {
+                case .prompt:
+                    promptView(lane, e, texts[i], number: prompts[i] ?? 0, first: first)
+                case .answer:
+                    // An answer after a prompt (or at the top) starts Claude's block with
+                    // the avatar; the next answers of the same block show only their line.
+                    let starts = previous == nil || previous == .prompt || previous == .compact || previous == .error
+                    answerView(e, texts[i], startsBlock: starts, first: first)
+                case .tool:
+                    toolView(lane, i, e, texts[i], first: first)
+                case .compact:
+                    marker(e.text ?? "Compacted", first: first)
+                case .error:
+                    marker(e.text ?? "API error", first: first)
+                }
+            }
+            .overlay(alignment: .leading) {
+                if jumpedTo == i {
+                    // The row the user came to, so the eye finds it.
+                    Rectangle().fill(Theme.accent).frame(width: 3).padding(.top, first ? 20 : 8)
+                        .accessibilityLabel("The row you went to")
+                }
             }
         }
     }

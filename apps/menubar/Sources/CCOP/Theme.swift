@@ -411,14 +411,23 @@ private struct TitleBarClicks: NSViewRepresentable {
 /// ⌘↑ and Home to the start. The two ends are marked in overlays, so the
 /// content's own layout (such as pinned headers) stays as it is.
 struct PageScrollView<Content: View>: View {
-    @ViewBuilder var content: () -> Content
+    private let content: (ScrollViewProxy) -> Content
 
     private enum End: Hashable { case top, bottom }
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = { _ in content() }
+    }
+
+    /// For a page that scrolls to one of its rows.
+    init(@ViewBuilder withProxy content: @escaping (ScrollViewProxy) -> Content) {
+        self.content = content
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                content()
+                content(proxy)
                     .overlay(alignment: .top) { Color.clear.frame(height: 1).id(End.top) }
                     .overlay(alignment: .bottom) { Color.clear.frame(height: 1).id(End.bottom) }
             }

@@ -32,11 +32,21 @@ final class AppModel {
     }
     /// The session and tab shown in the main window (apart from the popover's).
     var windowSelectedID: String? {
-        didSet { if windowSelectedID != oldValue { chatLane = "main" } }
+        didSet {
+            if windowSelectedID != oldValue {
+                chatLane = "main"
+                chatTarget = nil
+                causeID = nil
+            }
+        }
     }
     /// The lane the Chat tab shows: "main" or a subagent's id. Anatomy sets it
     /// to open one agent's chat.
     var chatLane = "main"
+    /// The place the Chat tab goes to next; it takes it and sets this to nil.
+    var chatTarget: ChatPlace?
+    /// The cause the Cause tab shows (`Cause.id`); nil: the biggest.
+    var causeID: String?
     /// No automatic updates (sessions, times, limits) while the user looks at
     /// the data; Refresh still reads once. Not saved: a new launch updates.
     var paused = false
@@ -236,6 +246,27 @@ final class AppModel {
         return await Task.detached(priority: .userInitiated) { Result { try source.chat(sessionID, lane: lane) } }.value
     }
 
+    /// Shows one event in the Chat tab.
+    func openInChat(_ place: ChatPlace) {
+        chatLane = place.lane
+        chatTarget = place
+        windowTab = .chat
+    }
+
+    /// One event for the JSON of a table row: a tool call with its whole input
+    /// and output, a prompt with its whole text.
+    func callExport(sessionID: String, lane: AnatomyLane, event: Int) async throws -> RowExport.Call {
+        let e = lane.events[event]
+        var full: ToolCall?
+        var text: String?
+        if let id = e.toolUseId {
+            full = try await call(sessionID, toolUseID: id).get()
+        } else if e.kind == .prompt {
+            text = try await chat(sessionID, lane: lane.id).get().byEvent[event]?.text
+        }
+        return RowExport.call(sessionID: sessionID, lane: lane, event: event, call: full, text: text)
+    }
+
     /// One tool call in full.
     func call(_ sessionID: String, toolUseID: String) async -> Result<ToolCall, Error> {
         guard let source else { return .failure(SessionSourceError.cliNotFound) }
@@ -354,12 +385,13 @@ final class AppModel {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case overview, spend, chat, anatomy, context
+    case overview, spend, cause, chat, anatomy, context
     var id: String { rawValue }
     var title: String {
         switch self {
         case .overview: "Overview"
         case .spend: "Spend"
+        case .cause: "Cause"
         case .chat: "Chat"
         case .anatomy: "Anatomy"
         case .context: "Context"

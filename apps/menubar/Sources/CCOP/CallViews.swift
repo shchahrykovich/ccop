@@ -68,6 +68,11 @@ struct CallSheet: View {
                 Text(e.label).font(.title3.weight(.semibold))
                 if let g = e.group { Text(g).font(.callout.monospaced()).foregroundStyle(.secondary) }
                 Spacer()
+                Button("Go to Chat") {
+                    dismiss()
+                    model.openInChat(ChatPlace(lane: lane.id, event: index))
+                }
+                .help("Close this and show this call in the Chat tab")
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             Text("\(lane.name) · \(e.start.formatted(date: .omitted, time: .standard))" + (e.text.map { " · \($0)" } ?? ""))

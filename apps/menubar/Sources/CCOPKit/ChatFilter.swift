@@ -44,6 +44,12 @@ public struct ChatFilter: Equatable, Sendable {
     public var isOn: Bool { !kinds.isEmpty || topCosts }
 
     /// The indices of the events to show, in their order.
+    /// This filter when it shows event `index`; else no filter, so that going
+    /// to that event finds it.
+    public func showing(_ index: Int, in events: [AnatomyEvent]) -> ChatFilter {
+        indices(events).contains(index) ? self : ChatFilter()
+    }
+
     public func indices(_ events: [AnatomyEvent]) -> [Int] {
         var shown = events.indices.filter { i in kinds.isEmpty || kinds.contains { $0.matches(events[i]) } }
         if topCosts {

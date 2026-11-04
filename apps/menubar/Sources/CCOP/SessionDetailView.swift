@@ -418,6 +418,7 @@ struct SubagentTree: View {
     @Environment(AppModel.self) private var model
     let anatomy: Anatomy
     @State private var showAll = false
+    @State private var shownCall: CallRef?
 
     private static let firstRows = 12
 
@@ -438,27 +439,30 @@ struct SubagentTree: View {
                     .font(.ui(11)).foregroundStyle(Theme.text3).monospacedDigit()
                     .help(Plan.limitShareHelp)
             }
-            Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 0) {
-                GridRow {
-                    Text("Agent").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Model").gridColumnAlignment(.leading)
-                    Text("Start")
-                    Text("Time")
-                    Text("Tokens")
-                    Text("Tools")
-                    Text("Cost")
+            let lines = shown.map(line)
+            let widths = Widths(lines, hasLimit: hasLimit)
+            VStack(alignment: .leading, spacing: 0) {
+                columns(widths) {
+                    Text("Agent")
+                } cells: {
+                    Text("Model").frame(width: widths.model, alignment: .leading)
+                    Text("Start").frame(width: widths.start, alignment: .trailing)
+                    Text("Time").frame(width: widths.time, alignment: .trailing)
+                    Text("Tokens").frame(width: widths.tokens, alignment: .trailing)
+                    Text("Tools").frame(width: widths.tools, alignment: .trailing)
+                    Text("Cost").frame(width: widths.cost, alignment: .trailing)
                     if hasLimit {
-                        Text("Day limit").help(Plan.limitShareHelp)
-                        Text("Week limit").help(Plan.limitShareHelp)
+                        Text("Day limit").frame(width: widths.day, alignment: .trailing).help(Plan.limitShareHelp)
+                        Text("Week limit").frame(width: widths.week, alignment: .trailing).help(Plan.limitShareHelp)
                     }
-                    Text("")
+                    Color.clear.frame(width: Self.buttonSize, height: 1)
                 }
                 .font(.ui(11, .medium))
                 .foregroundStyle(Theme.text3)
                 .padding(.vertical, 6)
-                ForEach(shown) { lane in
-                    Rectangle().fill(Theme.line2).frame(height: 1).gridCellUnsizedAxes(.horizontal)
-                    row(lane)
+                ForEach(lines, id: \.lane.id) { line in
+                    Rectangle().fill(Theme.line2).frame(height: 1)
+                    row(line, widths)
                 }
             }
             .font(.ui(12.5))
@@ -469,38 +473,114 @@ struct SubagentTree: View {
                     .foregroundStyle(Theme.accent)
             }
         }
+        .sheet(item: $shownCall) { ref in
+            if let lane = anatomy.lane(ref.lane), lane.events.indices.contains(ref.index) {
+                CallSheet(sessionID: anatomy.sessionId, lane: lane, index: ref.index)
+            }
+        }
     }
 
-    private func row(_ lane: AnatomyLane) -> some View {
-        GridRow {
+    private static let buttonSize: CGFloat = 22
+
+    /// The agent's column takes the room the others leave.
+    private func columns(_ widths: Widths, @ViewBuilder agent: () -> some View, @ViewBuilder cells: () -> some View) -> some View {
+        HStack(spacing: 14) {
+            agent().frame(maxWidth: .infinity, alignment: .leading)
+            cells()
+        }
+    }
+
+    /// One row's texts.
+    fileprivate struct Line {
+        var lane: AnatomyLane
+        var model: String
+        var start: String
+        var time: String
+        var tokens: String
+        var tools: String
+        var errors: String?
+        var cost: String
+        var day: String?
+        var week: String?
+        var toolsText: String { errors.map { "\(tools) · \($0)" } ?? tools }
+    }
+
+    private func line(_ lane: AnatomyLane) -> Line {
+        let parts = Plan.limitParts(costMicros: lane.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros)
+        return Line(lane: lane, model: shortModel(lane.model) ?? "",
+                    start: lane.startedAt?.formatted(date: .omitted, time: .shortened) ?? "",
+                    time: shortDuration(lane.duration), tokens: Format.tokens(lane.usage.total),
+                    tools: "\(lane.toolCalls)", errors: lane.errors > 0 ? plural(Int(lane.errors), "error") : nil,
+                    cost: Format.dollars(lane.costMicros), day: parts?.day, week: parts?.week)
+    }
+
+    /// The columns' widths: as wide as the widest title or value, so that they
+    /// line up from row to row and a whole row can take a right click.
+    fileprivate struct Widths {
+        var model, start, time, tokens, tools, cost, day, week: CGFloat
+
+        init(_ lines: [Line], hasLimit: Bool) {
+            let title = NSFont.systemFont(ofSize: 11, weight: .medium)
+            let plain = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .regular)
+            let bold = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .medium)
+            func width(_ name: String, _ font: NSFont, _ value: (Line) -> String) -> CGFloat {
+                max(textWidth(name, title), lines.map { textWidth(value($0), font) }.max() ?? 0)
+            }
+            model = width("Model", plain) { $0.model }
+            start = width("Start", plain) { $0.start }
+            time = width("Time", plain) { $0.time }
+            tokens = width("Tokens", plain) { $0.tokens }
+            tools = width("Tools", plain) { $0.toolsText }
+            cost = width("Cost", bold) { $0.cost }
+            day = hasLimit ? width("Day limit", plain) { $0.day ?? "" } : 0
+            week = hasLimit ? width("Week limit", plain) { $0.week ?? "" } : 0
+        }
+    }
+
+    private func row(_ line: Line, _ widths: Widths) -> some View {
+        let lane = line.lane
+        let spawn = anatomy.spawnPlace(of: lane)
+        return columns(widths) {
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 2).fill(Theme.agent).frame(width: 3, height: 14)
                 Text(lane.name).lineLimit(1).truncationMode(.tail)
             }
             .padding(.leading, CGFloat(max(0, anatomy.depth(of: lane) - 1)) * 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .help([lane.name, lane.agentType].compactMap { $0 }.joined(separator: "\n"))
-            Text(shortModel(lane.model) ?? "").foregroundStyle(Theme.text2)
-            Text(lane.startedAt?.formatted(date: .omitted, time: .shortened) ?? "")
-            Text(shortDuration(lane.duration))
-            Text(Format.tokens(lane.usage.total))
-            if lane.errors > 0 {
-                (Text("\(lane.toolCalls) · ") + Text(plural(Int(lane.errors), "error")).foregroundStyle(Theme.bad))
-            } else {
-                Text("\(lane.toolCalls)")
+        } cells: {
+            Text(line.model).foregroundStyle(Theme.text2).frame(width: widths.model, alignment: .leading)
+            Text(line.start).frame(width: widths.start, alignment: .trailing)
+            Text(line.time).frame(width: widths.time, alignment: .trailing)
+            Text(line.tokens).frame(width: widths.tokens, alignment: .trailing)
+            Group {
+                if let errors = line.errors {
+                    Text("\(line.tools) · ") + Text(errors).foregroundStyle(Theme.bad)
+                } else {
+                    Text(line.tools)
+                }
             }
-            Text(Format.dollars(lane.costMicros)).fontWeight(.medium)
-            if let parts = Plan.limitParts(costMicros: lane.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros) {
-                Text(parts.day).foregroundStyle(Theme.text2)
-                Text(parts.week).foregroundStyle(Theme.text2)
+            .frame(width: widths.tools, alignment: .trailing)
+            Text(line.cost).fontWeight(.medium).frame(width: widths.cost, alignment: .trailing)
+            if hasLimit {
+                Text(line.day ?? "").foregroundStyle(Theme.text2).frame(width: widths.day, alignment: .trailing)
+                Text(line.week ?? "").foregroundStyle(Theme.text2).frame(width: widths.week, alignment: .trailing)
             }
             SmallIconButton(symbol: "bubble.left.and.text.bubble.right", help: "Open this agent alone in Chat",
-                            size: 22, fill: Theme.bg) {
+                            size: Self.buttonSize, fill: Theme.bg) {
                 model.chatLane = lane.id
                 model.windowTab = .chat
             }
         }
+        .lineLimit(1)
         .monospacedDigit()
         .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .rowMenu(view: spawn.flatMap { place in
+                     anatomy.lane(place.lane)?.events[place.event].hasFullCall == true
+                         ? { shownCall = CallRef(lane: place.lane, index: place.event) } : nil
+                 },
+                 goTo: { model.openInChat(spawn ?? ChatPlace(lane: lane.id, event: 0)) },
+                 fileName: RowExport.fileName(sessionID: anatomy.sessionId, name: lane.name),
+                 json: { try RowExport.encode(RowExport.subagent(lane, in: anatomy)) })
     }
 }

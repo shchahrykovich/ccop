@@ -8,9 +8,9 @@ import SwiftUI
 struct TokenTimeline: View {
     @Environment(AppModel.self) private var model
     let anatomy: Anatomy
-    /// The position under the pointer: the chart's selection follows the
-    /// pointer on macOS. Nil when the pointer is away: the biggest period shows.
-    @State private var hovered: Double?
+    /// The bar under the pointer and the bar chosen with a click. With neither
+    /// the biggest period shows.
+    @State private var pick = ChartPick()
     @State private var width: CGFloat = 1000
 
     private static let height: CGFloat = 220
@@ -31,7 +31,7 @@ struct TokenTimeline: View {
     var body: some View {
         let c = anatomy.consumption()
         if let biggest = c.biggest {
-            let shown = hovered.map { min(max(Int($0), 0), c.buckets.count - 1) } ?? biggest
+            let shown = min(pick.shown(or: biggest), c.buckets.count - 1)
             let wide = width >= 460 + Self.gap + Self.aside
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: Self.gap))
                 : AnyLayout(VStackLayout(alignment: .leading, spacing: Self.gap))
@@ -81,7 +81,7 @@ struct TokenTimeline: View {
                 Chart {
                     RectangleMark(xStart: .value("From", Double(shown)), xEnd: .value("To", Double(shown + 1)),
                                   yStart: .value("Bottom", 0.0), yEnd: .value("Top", top))
-                        .foregroundStyle(Theme.text.opacity(0.08))
+                        .foregroundStyle(Theme.text.opacity(pick.pinned == nil ? 0.08 : 0.16))
                     ForEach(marks(c)) { m in
                         RectangleMark(xStart: .value("From", Double(m.bucket) + 0.1), xEnd: .value("To", Double(m.bucket) + 0.9),
                                       yStart: .value("Bottom", m.from), yEnd: .value("Top", m.to))
@@ -93,20 +93,24 @@ struct TokenTimeline: View {
                 .chartYAxis(.hidden)
                 .chartXScale(domain: 0.0 ... Double(count))
                 .chartYScale(domain: 0.0 ... top)
-                .chartXSelection(value: $hovered)
                 .chartOverlay { proxy in
-                    GeometryReader { geo in
-                        if let plot = proxy.plotFrame.map({ geo[$0] }),
-                           let x = proxy.position(forX: Double(biggest) + 0.5),
-                           let y = proxy.position(forY: Double(largest)) {
-                            Text("biggest · \(Format.smallPercent(c.share(largest)))")
-                                .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
-                                .foregroundStyle(Theme.text2)
-                                .fixedSize()
-                                .position(x: min(max(plot.minX + x, plot.minX + 44), plot.maxX - 44), y: plot.minY + y - 9)
+                    ZStack {
+                        GeometryReader { geo in
+                            if let plot = proxy.plotFrame.map({ geo[$0] }),
+                               let x = proxy.position(forX: Double(biggest) + 0.5),
+                               let y = proxy.position(forY: Double(largest)) {
+                                Text("biggest · \(Format.smallPercent(c.share(largest)))")
+                                    .font(.system(size: 10.5, weight: .semibold)).monospacedDigit()
+                                    .foregroundStyle(Theme.text2)
+                                    .fixedSize()
+                                    .position(x: min(max(plot.minX + x, plot.minX + 44), plot.maxX - 44), y: plot.minY + y - 9)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                        ChartPicker(proxy: proxy, pick: $pick) { x in
+                            proxy.value(atX: x, as: Double.self).map { min(max(Int($0), 0), count - 1) }
                         }
                     }
-                    .allowsHitTesting(false)
                 }
                 .padding(.horizontal, Self.gutter)
             }
@@ -202,21 +206,36 @@ struct TokenTimeline: View {
                 row("Model calls", "\(b.calls)")
             }
             .padding(.top, 4)
-            if !b.lanes.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Who used them").font(.system(size: 11)).foregroundStyle(Theme.text3)
-                    ForEach(b.lanes.prefix(4)) { share in
-                        row(name(share.id), Format.tokens(share.usage.total))
-                            .help("\(name(share.id)): \(Format.tokens(share.usage.total)) tokens, \(Format.dollars(share.costMicros))")
-                    }
-                    if b.lanes.count > 4 {
-                        Text("and \(b.lanes.count - 4) more").font(.system(size: 11)).foregroundStyle(Theme.text3)
+            // Always the room of `Self.laneRows` rows and the "more" line, so
+            // the card and the page below it keep their place from bar to bar.
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Who used them").font(.system(size: 11)).foregroundStyle(Theme.text3)
+                ForEach(0 ..< Self.laneRows, id: \.self) { i in
+                    if i < b.lanes.count {
+                        let share = b.lanes[i]
+                        LaneRow(title: name(share.id), value: Format.tokens(share.usage.total),
+                                help: "\(name(share.id)): \(Format.tokens(share.usage.total)) tokens, \(Format.dollars(share.costMicros)). Click to see its first model call of this period in Chat.") {
+                            if let place = anatomy.firstCall(of: share.id, in: b) { model.openInChat(place) }
+                        }
+                    } else {
+                        row(" ", " ").hidden()
                     }
                 }
-                .padding(.top, 4)
+                Text(b.lanes.count > Self.laneRows ? "and \(b.lanes.count - Self.laneRows) more" : " ")
+                    .font(.system(size: 11)).foregroundStyle(Theme.text3)
             }
-            Text("Move the pointer over the chart to see a period.")
+            .padding(.top, 4)
+            Button("Go to Chat") {
+                if let place = anatomy.chatPlace(in: b) { model.openInChat(place) }
+            }
+            .controlSize(.small)
+            .disabled(anatomy.chatPlace(in: b) == nil)
+            .help("Show the first model call of this period in the Chat tab")
+            .padding(.top, 2)
+            Text(pick.pinned == nil ? "Move the pointer over the chart to see a period. Click a bar to keep it here."
+                : "This bar stays here. Click another bar to change it, or this bar to let it go.")
                 .font(.system(size: 11)).foregroundStyle(Theme.text3)
+                .lineLimit(2, reservesSpace: true)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
         }
@@ -225,6 +244,9 @@ struct TokenTimeline: View {
         .background(Theme.soft, in: shape)
         .overlay(shape.strokeBorder(Theme.line, lineWidth: 1))
     }
+
+    /// The lanes the card names; the others are counted.
+    private static let laneRows = 4
 
     private static let limitHelp = "This period's cost against your limits. The limits count cost, not tokens, and a cache read costs far less than an output token. So the percent of the tokens and the percent of a limit can be far apart. The day limit is 1/7 of the week limit."
 
@@ -238,5 +260,29 @@ struct TokenTimeline: View {
             Text(value).lineLimit(1).fixedSize()
         }
         .font(.system(size: 12)).monospacedDigit()
+    }
+}
+
+/// A lane in the card: a click goes to it in Chat.
+private struct LaneRow: View {
+    let title: String
+    let value: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Text(value).lineLimit(1).fixedSize()
+            }
+            .font(.system(size: 12)).monospacedDigit()
+            .foregroundStyle(hovering ? Theme.accent : Theme.text)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering = $0 }
     }
 }
