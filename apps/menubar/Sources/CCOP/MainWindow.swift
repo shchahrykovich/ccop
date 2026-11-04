@@ -97,6 +97,7 @@ struct WindowDetail: View {
                         .font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
                 }
                 .help(session.title)
+                FlagButton(session: session)
                 Spacer(minLength: 12)
                 Segmented(options: DetailTab.allCases.map { ($0, $0.title) }, selection: $model.windowTab,
                           height: 24, equalWidths: false, radius: 8)

@@ -21,6 +21,10 @@ final class AppModel {
     var folder = FolderScope.load() {
         didSet { FolderScope.save(folder) }
     }
+    /// The ids of the flagged sessions; saved on each change.
+    var flagged = SessionFlags.load() {
+        didSet { SessionFlags.save(flagged) }
+    }
     var selectedID: String?
     var now = Date()
     var popoverOpen = false {
@@ -217,12 +221,12 @@ final class AppModel {
     }
 
     var visible: [Session] {
-        SessionList.filter(sessions, query: query, period: period, folder: folder, now: now)
+        SessionList.filter(sessions, query: query, period: period, folder: folder, flagged: flagged, now: now)
     }
 
     /// The folder menu: folders with sessions in the period, and the chosen one.
     var folderChoices: [FolderChoice] {
-        SessionList.folders(sessions, period: period, keeping: folder?.path, now: now)
+        SessionList.folders(sessions, period: period, flagged: flagged, keeping: folder?.path, now: now)
     }
 
     var selected: Session? {
@@ -234,6 +238,10 @@ final class AppModel {
     var windowSelected: Session? {
         // `--window <id-prefix>` gives a prefix.
         windowSelectedID.flatMap { id in sessions.first { $0.id == id } ?? sessions.first { $0.id.hasPrefix(id) } }
+    }
+
+    func toggleFlag(_ s: Session) {
+        if flagged.contains(s.id) { flagged.remove(s.id) } else { flagged.insert(s.id) }
     }
 
     func toggleDay(_ title: String) {

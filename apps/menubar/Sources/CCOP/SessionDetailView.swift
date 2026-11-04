@@ -44,6 +44,7 @@ struct SessionDetailView: View {
                 .buttonStyle(.plain)
                 Spacer()
                 if s.active { ActivePill() }
+                FlagButton(session: s)
                 Button { model.openWindow?(s.id, .overview) } label: { IconLabel(title: "Open in window", symbol: "macwindow") }
                     .buttonStyle(DesignButtonStyle(kind: .bordered, height: 26, padding: 10, fontSize: 12))
                     .help("Open this session in the main window")

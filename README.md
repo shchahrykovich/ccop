@@ -10,6 +10,7 @@ It reads the transcript files that Claude Code already writes to `~/.claude/proj
 |---|---|
 | Menu bar | Today as a percent of your daily share, and the week as a percent of your weekly limit, for example `33%/87%` |
 | Popover | Sessions grouped by day, with title, folder, branch and tokens |
+| Flagged list | The sessions you flagged, of any age: right-click a session and choose **Flag**, then choose **Flagged** beside the periods |
 | Overview tab | Totals for one session, by model |
 | Spend tab | Cost per prompt, per cause and per subagent, and tips with the cost or saving of each |
 | Anatomy tab | A timeline of turns, model calls, tool calls and subagents |

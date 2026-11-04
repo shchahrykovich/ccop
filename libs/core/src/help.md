@@ -17,6 +17,12 @@ ccop adds nothing to `CLAUDE.md`, so your other sessions do not pay for it. You 
    - Tell the agent: "Run `ccop guide` and follow it".
 3. Paste, and add your question. For example: "How can this session use fewer tokens?"
 
+## Flag a session
+
+To keep a session easy to find, right-click it in the list and choose **Flag**. The flag button beside the session's title does the same. To see all flagged sessions, of any age, choose **Flagged** beside Today, 7 days, 30 days and All. Search and the folder filter also apply to this list.
+
+Flags stay on this Mac, in the settings of the app. The `ccop` command does not know about them.
+
 ## Commands
 
 All commands take `--json`. `ID` is the start of a session id.

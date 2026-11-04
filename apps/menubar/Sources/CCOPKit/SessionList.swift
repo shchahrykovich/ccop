@@ -5,6 +5,8 @@ import Foundation
 
 public enum Period: String, CaseIterable, Identifiable, Sendable {
     case today, week, month, all
+    /// Not a time: the sessions a person flagged, of any age.
+    case flagged
 
     public var id: String { rawValue }
 
@@ -25,17 +27,32 @@ public enum Period: String, CaseIterable, Identifiable, Sendable {
         case .week: "7 days"
         case .month: "30 days"
         case .all: "All"
+        case .flagged: "Flagged"
         }
     }
 
-    /// The first moment that belongs to the period; nil for all time.
+    /// The first moment that belongs to the period; nil for all time and for
+    /// the flagged sessions.
     public func start(now: Date, calendar: Calendar = .current) -> Date? {
         switch self {
         case .today: calendar.startOfDay(for: now)
         case .week: calendar.date(byAdding: .day, value: -7, to: now)
         case .month: calendar.date(byAdding: .day, value: -30, to: now)
-        case .all: nil
+        case .all, .flagged: nil
         }
+    }
+}
+
+/// The ids of the sessions a person flagged, saved in this app's settings.
+public enum SessionFlags {
+    public static let defaultsKey = "flaggedSessions"
+
+    public static func load(_ defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: defaultsKey) ?? [])
+    }
+
+    public static func save(_ ids: Set<String>, _ defaults: UserDefaults = .standard) {
+        defaults.set(ids.sorted(), forKey: defaultsKey)
     }
 }
 
@@ -120,8 +137,10 @@ public struct FolderNode: Identifiable, Equatable, Sendable {
 public enum SessionList {
     /// Sessions active in `period`, in the `folder` scope (nil: any folder), whose
     /// title, prompts, project or id contain every word of `query` (any
-    /// case), the newest first.
-    public static func filter(_ sessions: [Session], query: String, period: Period, folder: FolderScope? = nil, now: Date,
+    /// case), the newest first. With the period `.flagged`: the sessions in
+    /// `flagged`, of any age.
+    public static func filter(_ sessions: [Session], query: String, period: Period, folder: FolderScope? = nil,
+                              flagged: Set<String> = [], now: Date,
                               calendar: Calendar = .current) -> [Session] {
         let start = period.start(now: now, calendar: calendar)
         let folder: FolderScope? = switch folder {
@@ -132,9 +151,13 @@ public enum SessionList {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return sessions
             .filter { s in
-                // No model call and no longer running: a `claude -p /usage` run
-                // or a session closed before its first answer.
-                if s.usage.total == 0, !s.active { return false }
+                if period == .flagged {
+                    if !flagged.contains(s.id) { return false }
+                } else if s.usage.total == 0, !s.active {
+                    // No model call and no longer running: a `claude -p /usage`
+                    // run or a session closed before its first answer.
+                    return false
+                }
                 if let start, s.lastActivity < start { return false }
                 if let folder, !folder.contains(normalized(s.projectDir)) { return false }
                 if words.isEmpty { return true }
@@ -148,10 +171,10 @@ public enum SessionList {
     /// The folders with sessions in `period`, by label (any case). `keeping`
     /// (the folder chosen now) stays in the list with 0 sessions when the
     /// period has none, so the menu can still show it.
-    public static func folders(_ sessions: [Session], period: Period, keeping: String? = nil, now: Date,
+    public static func folders(_ sessions: [Session], period: Period, flagged: Set<String> = [], keeping: String? = nil, now: Date,
                                calendar: Calendar = .current) -> [FolderChoice] {
         var counts: [String: Int] = [:]
-        for s in filter(sessions, query: "", period: period, now: now, calendar: calendar) {
+        for s in filter(sessions, query: "", period: period, flagged: flagged, now: now, calendar: calendar) {
             counts[normalized(s.projectDir), default: 0] += 1
         }
         if let keeping { counts[normalized(keeping), default: 0] += 0 }

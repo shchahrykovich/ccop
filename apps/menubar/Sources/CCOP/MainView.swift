@@ -60,10 +60,10 @@ struct SessionListView: View {
                             Section {
                                 if !collapsed {
                                     ForEach(section.sessions) { s in
-                                        SessionRow(session: s, now: model.now,
+                                        SessionRow(session: s, now: model.now, flagged: model.flagged.contains(s.id),
                                                    select: { select(s.id) },
                                                    openWindow: { model.openWindow?(s.id, .overview) })
-                                        .contextMenu { Button("Copy for Agent") { model.copyForAgent(s) } }
+                                        .contextMenu { SessionMenu(model: model, session: s) }
                                     }
                                 }
                             } header: {
@@ -135,10 +135,10 @@ struct SidebarView: View {
                             .padding(.horizontal, 8)
                             .frame(height: 26)
                             ForEach(section.sessions) { s in
-                                SidebarRow(session: s, now: model.now, selected: s.id == selectedID)
+                                SidebarRow(session: s, now: model.now, flagged: model.flagged.contains(s.id), selected: s.id == selectedID)
                                     .contentShape(Rectangle())
                                     .onTapGesture { select(s.id) }
-                                    .contextMenu { Button("Copy for Agent") { model.copyForAgent(s) } }
+                                    .contextMenu { SessionMenu(model: model, session: s) }
                             }
                         }
                     }
@@ -194,10 +194,62 @@ private struct EmptyList: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Text(model.loadedAt == nil && model.error == nil ? "Reading sessions…" : "No sessions")
+        Text(message)
+            .multilineTextAlignment(.center)
             .foregroundStyle(Theme.text3)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg)
+    }
+
+    private var message: String {
+        if model.loadedAt == nil, model.error == nil { return "Reading sessions…" }
+        if model.period == .flagged, model.flagged.isEmpty { return "No flagged sessions.\nRight-click a session to flag it." }
+        return "No sessions"
+    }
+}
+
+/// The right-click menu of a session in a list.
+struct SessionMenu: View {
+    let model: AppModel
+    let session: Session
+
+    var body: some View {
+        Button(model.flagged.contains(session.id) ? "Remove Flag" : "Flag") { model.toggleFlag(session) }
+        Button("Copy for Agent") { model.copyForAgent(session) }
+    }
+}
+
+/// The small flag beside the title of a flagged session.
+struct FlagMark: View {
+    var color: Color = Theme.warn
+
+    var body: some View {
+        Image(systemName: "flag.fill")
+            .font(.system(size: 9))
+            .foregroundStyle(color)
+            .accessibilityLabel("Flagged")
+            .help("Flagged")
+    }
+}
+
+/// Flags one session, or removes its flag.
+struct FlagButton: View {
+    @Environment(AppModel.self) private var model
+    let session: Session
+
+    var body: some View {
+        let on = model.flagged.contains(session.id)
+        let help = on ? "Remove the flag from this session" : "Flag this session, to find it in the Flagged list"
+        Button { model.toggleFlag(session) } label: {
+            Image(systemName: on ? "flag.fill" : "flag")
+                .font(.system(size: 13))
+                .foregroundStyle(on ? Theme.warn : Theme.text2)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -405,6 +457,7 @@ struct UsageBar: View {
 struct SessionRow: View {
     let session: Session
     let now: Date
+    var flagged = false
     let select: () -> Void
     let openWindow: () -> Void
 
@@ -414,7 +467,10 @@ struct SessionRow: View {
                 HStack(alignment: .top, spacing: 8) {
                     dot.padding(.top, 5)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(session.title).lineLimit(1)
+                        HStack(spacing: 5) {
+                            Text(session.title).lineLimit(1)
+                            if flagged { FlagMark() }
+                        }
                         Text(meta).font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
                     }
                     Spacer(minLength: 8)
@@ -460,6 +516,7 @@ struct SessionRow: View {
 struct SidebarRow: View {
     let session: Session
     let now: Date
+    var flagged = false
     let selected: Bool
 
     var body: some View {
@@ -471,7 +528,10 @@ struct SidebarRow: View {
                 .padding(.top, 5)
                 .help(session.active ? "Active: its transcript changed in the last 2 minutes" : "")
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.title).lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(session.title).lineLimit(1)
+                    if flagged { FlagMark(color: selected ? .white : Theme.warn) }
+                }
                 Text(([session.projectName, session.gitBranch].compactMap { $0 } + [Format.ago(session.lastActivity, now: now)])
                     .joined(separator: " · "))
                     .font(.ui(11)).foregroundStyle(secondary).lineLimit(1)
