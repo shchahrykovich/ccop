@@ -29,6 +29,7 @@ cargo run -p ccop -- top commands --since 7d --by time   # a list: commands, cau
 cargo run -p ccop -- cause <id-prefix> Bash --limit 20   # the costliest calls of a tool or a program
 cargo run -p ccop -- time <id-prefix>                    # where the clock went: model, tools, subagents, waiting
 "build/CCOP Dev.app/Contents/MacOS/CCOP" --plan                # open the plan settings window at launch
+"build/CCOP Dev.app/Contents/MacOS/CCOP" --about               # open the About panel at launch
 UPDATE_EXAMPLES=1 cargo test -p ccop-core --test api_example   # rewrite api/anatomy.example.json after a type change
 ```
 

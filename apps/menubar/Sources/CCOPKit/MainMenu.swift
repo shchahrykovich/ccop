@@ -8,8 +8,7 @@ public enum MainMenu {
     public static func make(appName: String) -> NSMenu {
         let main = NSMenu()
         main.addItem(submenu(appName, [
-            // The standard panel shows the version from Info.plist.
-            item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
+            about(appName),
             .separator(),
             item("Hide \(appName)", #selector(NSApplication.hide(_:)), "h"),
             .separator(),
@@ -28,6 +27,12 @@ public enum MainMenu {
         main.addItem(window)
         NSApp?.windowsMenu = window.submenu
         return main
+    }
+
+    private static func about(_ appName: String) -> NSMenuItem {
+        let about = item("About \(appName)", #selector(AboutPanel.show(_:)), "")
+        about.target = AboutPanel.shared
+        return about
     }
 
     /// Target nil: the action goes to the first responder, so Close acts on the key window.

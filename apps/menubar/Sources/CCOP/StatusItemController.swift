@@ -247,10 +247,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     @objc private func refreshClicked() { model.refresh() }
 
-    /// The standard About panel: icon, name, version and build.
     @objc private func aboutClicked() {
-        NSApp.activate()
-        NSApp.orderFrontStandardAboutPanel(nil)
+        AboutPanel.shared.show(nil)
     }
     @objc private func planClicked() { model.openPlanSettings?() }
     @objc private func openWindowClicked() { openWindow(session: nil, tab: nil) }

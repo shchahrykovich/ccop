@@ -21,10 +21,20 @@ final class MainMenuTests: XCTestCase {
         XCTAssertEqual(item(menu, key: "q")?.action, #selector(NSApplication.terminate(_:)))
     }
 
-    func testTheAppMenuStartsWithAboutThatShowsTheVersion() {
+    func testTheAppMenuStartsWithAboutThatOpensOurPanel() {
         let about = MainMenu.make(appName: "ccop").items.first?.submenu?.items.first
         XCTAssertEqual(about?.title, "About ccop")
-        XCTAssertEqual(about?.action, #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        XCTAssertEqual(about?.action, #selector(AboutPanel.show(_:)))
+        XCTAssertTrue(about?.target === AboutPanel.shared)
+    }
+
+    func testTheAboutPanelHasTheVersionAndALinkToTheRepository() throws {
+        let options = AboutPanel.options(version: "1.2.3")
+        XCTAssertEqual(options[.applicationVersion] as? String, "1.2.3")
+        XCTAssertEqual(options[.version] as? String, "", "no build number in brackets")
+        let credits = try XCTUnwrap(options[.credits] as? NSAttributedString)
+        XCTAssertEqual(credits.string, "github.com/shchahrykovich/ccop")
+        XCTAssertEqual(credits.attribute(.link, at: 0, effectiveRange: nil) as? URL, URL(string: "https://github.com/shchahrykovich/ccop"))
     }
 
     func testCopyAndSelectAllWorkInSelectableText() {

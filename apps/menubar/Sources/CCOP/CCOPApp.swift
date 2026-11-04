@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { controller.showPopover() }
         }
         // For development: `CCOP --plan` opens the plan settings at launch.
+        if CommandLine.arguments.contains("--about") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { AboutPanel.shared.show(nil) }
+        }
         if CommandLine.arguments.contains("--plan") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.model.openPlanSettings?() }
         }
