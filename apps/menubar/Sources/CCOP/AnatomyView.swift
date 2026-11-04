@@ -949,16 +949,18 @@ private struct ToolCards: View {
             } else {
                 AutoFitGrid(minWidth: 170, spacing: 10) {
                     ForEach(anatomy.tools) { t in
-                        if Self.agentTools.contains(t.tool), anatomy.lanes.count > 1 {
-                            // A click lists the subagents; one opens alone in Chat.
-                            Button { agentList = true } label: {
-                                card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded).contentShape(Rectangle())
+                        let shown = card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded)
+                            .clickableRow(outset: 0, radius: 10) {
+                                if let cause = anatomy.spend.cause(ofTool: t.tool) { model.openCause(cause) }
                             }
-                            .buttonStyle(.plain)
-                            .help("Show the subagents, to open one in Chat")
-                            .popover(isPresented: $agentList, arrowEdge: .bottom) { subagentList }
+                            .accessibilityHint("Shows each call of this tool in the Cause tab")
+                        if Self.agentTools.contains(t.tool), anatomy.lanes.count > 1 {
+                            // The right button lists the subagents; one opens alone in Chat.
+                            shown
+                                .contextMenu { Button("Show Subagents") { agentList = true } }
+                                .popover(isPresented: $agentList, arrowEdge: .bottom) { subagentList }
                         } else {
-                            card(t, added: added[t.tool] ?? 0, maxAdded: maxAdded)
+                            shown
                         }
                     }
                 }
@@ -1009,7 +1011,7 @@ private struct ToolCards: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Ink.line))
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .help("\(t.tool): \(t.calls) calls, \(t.errors) errors, \(Format.duration(Double(t.totalMs) / 1000)) in total, returned \(Format.bytes(t.resultBytes)), added \(Format.tokens(added)) tokens to the context. Time adds up the time from each call to its result; calls that ran in parallel add up too.")
+        .help("\(t.tool): \(t.calls) calls, \(t.errors) errors, \(Format.duration(Double(t.totalMs) / 1000)) in total, returned \(Format.bytes(t.resultBytes)), added \(Format.tokens(added)) tokens to the context. Time adds up the time from each call to its result; calls that ran in parallel add up too. Click to see each call in the Cause tab.")
     }
 }
 

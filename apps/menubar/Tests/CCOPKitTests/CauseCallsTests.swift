@@ -73,6 +73,25 @@ final class CauseCallsTests: XCTestCase {
         XCTAssertEqual(s.shownCauses.map(\.name), ["B", "A", "C"])
     }
 
+    func testAToolNameFindsItsToolCauseOnly() {
+        let s = Spend(costMicros: 0, tokens: 0, causes: [cause(.other, "Bash"), cause(.tool, "Bash"), cause(.tool, "Read")],
+                      lanes: [], tips: [], commands: [], errors: [])
+        XCTAssertEqual(s.cause(ofTool: "Bash")?.kind, .tool)
+        XCTAssertEqual(s.cause(ofTool: "Read")?.name, "Read")
+        XCTAssertNil(s.cause(ofTool: "Write"))
+        let unnamed = Spend(costMicros: 0, tokens: 0, causes: [cause(.tool, "Tool")], lanes: [], tips: [], commands: [], errors: [])
+        XCTAssertEqual(unnamed.cause(ofTool: "")?.name, "Tool")
+    }
+
+    /// The Anatomy tab's tool cards open the Cause tab: Rust must name both the same.
+    func testEveryToolOfTheExampleHasACauseWithItsCalls() throws {
+        let a = try Anatomy.decode(Data(contentsOf: AnatomyContractTests.example))
+        XCTAssertFalse(a.tools.isEmpty)
+        for t in a.tools {
+            XCTAssertEqual(a.spend.cause(ofTool: t.tool)?.count, t.calls, t.tool)
+        }
+    }
+
     /// The Rust code wrote these causes: the Swift list of calls must add up to them.
     func testTheCallsOfEachCauseAddUpToTheCauseFromRust() throws {
         let a = try Anatomy.decode(Data(contentsOf: AnatomyContractTests.example))

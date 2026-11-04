@@ -25,19 +25,22 @@ extension View {
 }
 
 extension View {
-    /// A row that a click acts on: it lights up under the pointer.
-    func clickableRow(action: @escaping () -> Void) -> some View {
-        modifier(ClickableRow(action: action))
+    /// A row or card that a click acts on: it lights up under the pointer,
+    /// `outset` points past its edge.
+    func clickableRow(outset: CGFloat = 4, radius: CGFloat = 6, action: @escaping () -> Void) -> some View {
+        modifier(ClickableRow(outset: outset, radius: radius, action: action))
     }
 }
 
 private struct ClickableRow: ViewModifier {
+    let outset: CGFloat
+    let radius: CGFloat
     let action: () -> Void
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
-            .background(hovering ? Theme.text.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 6).inset(by: -4))
+            .background(hovering ? Theme.text.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: radius).inset(by: -outset))
             .contentShape(Rectangle())
             .onHover { inside in
                 guard inside != hovering else { return }

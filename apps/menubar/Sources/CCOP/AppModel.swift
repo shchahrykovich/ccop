@@ -246,6 +246,12 @@ final class AppModel {
         return await Task.detached(priority: .userInitiated) { Result { try source.chat(sessionID, lane: lane) } }.value
     }
 
+    /// Shows one cause in the Cause tab.
+    func openCause(_ cause: Cause) {
+        causeID = cause.id
+        windowTab = .cause
+    }
+
     /// Shows one event in the Chat tab.
     func openInChat(_ place: ChatPlace) {
         chatLane = place.lane

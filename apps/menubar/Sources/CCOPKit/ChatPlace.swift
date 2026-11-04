@@ -59,6 +59,13 @@ public extension Cause {
 }
 
 public extension Spend {
+    /// The cause made of one tool's results. A call with no tool name is
+    /// `""` in `Anatomy.tools` and `Tool` in the causes.
+    func cause(ofTool tool: String) -> Cause? {
+        let name = tool.isEmpty ? "Tool" : tool
+        return causes.first { $0.kind == .tool && $0.name == name }
+    }
+
     /// The causes worth showing, the most cost first.
     var shownCauses: [Cause] {
         causes.filter { $0.costMicros > 0 || $0.count > 0 }

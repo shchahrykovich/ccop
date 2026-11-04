@@ -447,10 +447,7 @@ struct CauseTable: View {
                 .font(.system(size: SpendStyle.row))
                 .monospacedDigit()
                 .help(help(c))
-                .clickableRow {
-                    model.causeID = c.id
-                    model.windowTab = .cause
-                }
+                .clickableRow { model.openCause(c) }
                 .accessibilityHint("Shows each call of this cause")
             }
         }
