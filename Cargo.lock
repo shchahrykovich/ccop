@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "ccop"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "ccop-core",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "ccop-core"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "chrono",
  "serde",
