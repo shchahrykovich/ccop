@@ -495,7 +495,7 @@ final class PlanWindowController {
             return w
         }()
         window = w
-        w.makeKeyAndOrderFront(nil)
+        w.raiseOverOtherApps()
         NSApp.activate()
     }
 }

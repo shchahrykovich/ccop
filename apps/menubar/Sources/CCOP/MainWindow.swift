@@ -21,7 +21,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let window = self.window ?? makeWindow()
         self.window = window
         NSApp.setActivationPolicy(.regular)
-        window.makeKeyAndOrderFront(nil)
+        window.raiseOverOtherApps()
         NSApp.activate()
         // No text field gets the focus by itself.
         DispatchQueue.main.async { window.makeFirstResponder(nil) }

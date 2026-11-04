@@ -42,4 +42,41 @@ final class MainMenuTests: XCTestCase {
         XCTAssertEqual(item(menu, key: "c")?.action, #selector(NSText.copy(_:)))
         XCTAssertEqual(item(menu, key: "a")?.action, #selector(NSText.selectAll(_:)))
     }
+
+    func testAWindowIsRaisedOverOtherAppsNotOnlyInItsOwnApp() {
+        _ = NSApplication.shared
+        let window = SpyWindow()
+        window.raiseOverOtherApps()
+        XCTAssertEqual([window.raised, window.madeKey], [1, 1])
+        XCTAssertEqual(window.orderedInItsApp, 0, "makeKeyAndOrderFront leaves it behind the front app")
+    }
+
+    /// `activate()` is only a request: an app in the background may not get
+    /// to the front, and then its new window stays behind the front app's.
+    func testTheAboutPanelIsRaisedOverOtherAppsAtEachCall() {
+        _ = NSApplication.shared
+        let main = SpyWindow()
+        let about = SpyWindow()
+        var windows: [NSWindow] = [main]
+        let panel = AboutPanel()
+
+        panel.present(windows: { windows }, open: { windows.append(about) })
+        XCTAssertEqual([about.raised, about.madeKey], [1, 1], "the first click")
+        XCTAssertEqual([main.raised, main.madeKey], [0, 0], "another window of the app stays where it is")
+
+        // Closed and opened again: the standard call reuses the same panel.
+        panel.present(windows: { windows }, open: {})
+        XCTAssertEqual(about.raised, 2, "the second click")
+        XCTAssertEqual(main.raised, 0)
+    }
+}
+
+/// Records what the panel asks of a window, and does not touch the screen.
+private final class SpyWindow: NSWindow {
+    var raised = 0
+    var madeKey = 0
+    override func orderFrontRegardless() { raised += 1 }
+    override func makeKey() { madeKey += 1 }
+    var orderedInItsApp = 0
+    override func makeKeyAndOrderFront(_ sender: Any?) { orderedInItsApp += 1 }
 }
