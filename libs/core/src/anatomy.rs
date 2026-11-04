@@ -453,10 +453,17 @@ impl LaneReader {
             self.last = Some(self.last.map_or(at, |l| l.max(at)));
             return;
         }
+        // Not a prompt, but the next model call goes out after it: a subagent's
+        // hand-back can come long after the last answer.
+        let waited = self.last.map_or(at, |l| l.max(at));
         if r.get("isMeta").and_then(Value::as_bool) == Some(true) || r.get("isCompactSummary").and_then(Value::as_bool) == Some(true) {
+            self.last = Some(waited);
             return;
         }
-        let Some(text) = prompt_text(&content.to_string()) else { return };
+        let Some(text) = prompt_text(&content.to_string()) else {
+            self.last = Some(waited);
+            return;
+        };
         let i = self.push(EventKind::Prompt, at, at);
         // The chat keeps the whole prompt; a slash command stays in its short form.
         let full = match content {
@@ -853,6 +860,16 @@ mod tests {
     fn result(t: &str, use_id: &str, text: &str, error: bool, extra: Value) -> Value {
         json!({"type": "user", "timestamp": format!("2026-11-02T10:{t}Z"), "toolUseResult": extra,
                "message": {"content": [{"type": "tool_result", "tool_use_id": use_id, "content": text, "is_error": error}]}})
+    }
+
+    /// A subagent's hand-back is a meta record. The next model call goes out
+    /// then, not when the previous answer ended: the wait is not model time.
+    #[test]
+    fn an_answer_after_a_meta_record_starts_at_that_record() {
+        let meta = json!({"type": "user", "isMeta": true, "timestamp": "2026-11-02T10:40:00Z", "message": {"content": "[Subagent hand-back] done"}});
+        let l = lane(LaneReader::main(), &[prompt("00:00", "go"), answer("00:05", "m1", 1, json!([])), meta, answer("40:10", "m2", 1, json!([]))]);
+        let second = l.events.iter().filter(|e| e.kind == EventKind::Answer).nth(1).unwrap();
+        assert_eq!((second.start, second.end), (at("40:00"), at("40:10")));
     }
 
     #[test]
