@@ -233,11 +233,18 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(short.hours, [1, 2, 3, 4, 5])
 
         // 22:00, 00:00, 02:00, 04:00; from a start that is not on the hour.
+        // 06:00 is at 9.5 of 10 hours: too close to the end.
         let half = d("2026-11-03T20:30:00Z")
-        XCTAssertEqual(Plan.axisTicks(from: half, hours: 10, calendar: utc).hours, [1.5, 3.5, 5.5, 7.5, 9.5])
+        XCTAssertEqual(Plan.axisTicks(from: half, hours: 10, calendar: utc).hours, [1.5, 3.5, 5.5, 7.5])
 
         // A day: 6 hours apart, on the clock's 0, 6, 12 and 18.
         XCTAssertEqual(Plan.axisTicks(from: start, hours: 24, calendar: utc).hours, [4, 10, 16, 22])
+    }
+
+    func testNoAxisTickIsSoCloseToTheEndThatItsLabelIsCutOff() {
+        // 6 h 1 min from 20:00: the tick at 2:00 is 1 minute from the right edge.
+        let start = d("2026-11-03T20:00:00Z")
+        XCTAssertEqual(Plan.axisTicks(from: start, hours: 6 + 1.0 / 60, calendar: utc).hours, [2, 4])
     }
 
     func testACostIsShownAsAPartOfTheDayAndWeekLimits() {

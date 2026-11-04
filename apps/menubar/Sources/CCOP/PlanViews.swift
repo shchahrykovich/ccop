@@ -95,8 +95,8 @@ struct PlanCards: View {
 /// each week's reset. In the popover, under the two cards.
 struct WeekCompareCard: View {
     @Environment(AppModel.self) private var model
-    /// Saved: the whole limit week, or only from the reset to now.
-    @AppStorage("weekGraphSoFar") private var soFar = false
+    /// Saved: only from the reset to now (the default), or the whole limit week.
+    @AppStorage("weekGraphSoFar") private var soFar = true
 
     private struct Mark: Identifiable {
         var week: String

@@ -220,12 +220,15 @@ public enum Plan {
 
     /// The marks on a graph's time axis, in hours after `start`. Over 36 hours:
     /// each midnight (`byDay`). Shorter: round clock hours, 1, 2 or 6 hours apart.
+    /// A label starts at its tick, so none is in the last 8% of the range: its
+    /// label would be cut off at the right edge.
     public static func axisTicks(from start: Date, hours: Double,
                                  calendar: Calendar = .current) -> (hours: [Double], byDay: Bool) {
         let end = start.addingTimeInterval(hours * 3600)
+        let lastTick = start.addingTimeInterval(hours * 3600 * 0.92)
         var out: [Double] = []
         func add(_ date: Date) {
-            if date > start, date < end { out.append(date.timeIntervalSince(start) / 3600) }
+            if date > start, date <= lastTick { out.append(date.timeIntervalSince(start) / 3600) }
         }
         if hours > 36 {
             var day = calendar.startOfDay(for: start)
