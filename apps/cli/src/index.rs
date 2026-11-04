@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 /// Change it when `Entry` or `Transcript` changes meaning: an index of
 /// another format is dropped and every file is read again.
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 
 /// A session counts as active when a file of it changed this recently.
 pub const ACTIVE_SECS: i64 = 120;
@@ -111,6 +111,15 @@ pub fn scan(places: &Places, now: DateTime<Utc>) -> Result<ScanResult> {
                     let Some((i, entry)) = work.get(n) else { break };
                     let f = &found[*i];
                     let mut entry = entry.clone();
+                    // A fork found to be one only now, because its meta file
+                    // came after its first lines, is read again from the start.
+                    if f.subagent
+                        && !entry.transcript.reads_a_fork()
+                        && let Some(call) = crate::anatomy::lane_meta(&f.path).fork_call()
+                    {
+                        entry.transcript = Transcript::for_fork(call);
+                        entry.offset = 0;
+                    }
                     match read_from(&f.path, entry.offset, &mut entry.transcript) {
                         Ok(end) => {
                             bytes_read.fetch_add((end - entry.offset) as usize, Ordering::Relaxed);

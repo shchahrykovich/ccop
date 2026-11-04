@@ -23,13 +23,15 @@ public struct Anatomy: Codable, Equatable, Sendable {
 
     /// How deep a lane is: 0 for main, 1 for a subagent main started, ...
     public func depth(of lane: AnatomyLane) -> Int {
-        var depth = 0
+        guard lane.id != "main" else { return 0 }
+        var depth = 1
+        var seen: Set<String> = [lane.id]
         var parent = lane.parent
-        while let p = parent, p != "main", depth < lanes.count, let next = self.lane(p) {
+        while let p = parent, p != "main", seen.insert(p).inserted, let next = self.lane(p) {
             depth += 1
             parent = next.parent
         }
-        return lane.id == "main" ? 0 : depth + 1
+        return depth
     }
 
     /// The lanes in tree order: each subagent after the lane that started it.

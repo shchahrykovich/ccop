@@ -196,9 +196,13 @@ public struct UsageLimits: Codable, Equatable, Sendable {
 public enum LimitsReaderError: Error, LocalizedError, Equatable {
     case failed(String)
     case unreadable(String)
+    case notFound
+    case chosenPathMissing(String)
 
     public var errorDescription: String? {
         switch self {
+        case .notFound: "Claude Code was not found. Choose its path below, or type the numbers yourself."
+        case let .chosenPathMissing(path): "The path you chose for Claude Code is not a program: \(path)"
         case let .failed(why): "Could not run claude -p /usage: \(why)"
         case let .unreadable(text): "claude -p /usage printed no limits: \(text.prefix(200))"
         }
@@ -210,20 +214,64 @@ public enum LimitsReaderError: Error, LocalizedError, Equatable {
 public enum LimitsReader {
     /// `--no-session-persistence`: without it each read leaves a "/usage"
     /// session (0 tokens: /usage calls no model) in ~/.claude/projects.
-    public static let command = "claude -p --no-session-persistence /usage"
+    private static let arguments = "-p --no-session-persistence /usage"
+    public static let command = "claude \(arguments)"
+    /// Where the path a person chose for Claude Code is saved.
+    public static let pathDefaultsKey = "claudePath"
+    /// What a shell returns when it cannot find a command.
+    private static let commandNotFound: Int32 = 127
+    /// Where Claude Code's installers put it, for a shell that does not find it.
+    private static let installPlaces = ["~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
 
-    public static func read(now: @autoclosure () -> Date = Date(), timeout: TimeInterval = 90) throws -> UsageLimits {
-        let text = try run(timeout: timeout)
+    /// The path a person chose or typed, ready to run. Nil when it is empty.
+    public static func chosenPath(_ text: String, environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty { return nil }
+        guard path == "~" || path.hasPrefix("~/") else { return path }
+        return (environment["HOME"] ?? NSHomeDirectory()) + path.dropFirst()
+    }
+
+    /// The shell's arguments to try in order. A login shell does not read
+    /// `.zshrc`, and that is where many people set their PATH or an alias, so
+    /// an interactive shell comes next; it is second because it starts slower.
+    /// A chosen path also needs both: a `claude` script may need `node` from them.
+    static func attempts(claudePath: String?, environment: [String: String]) -> [[String]] {
+        func both(_ command: String) -> [[String]] { [["-l", "-c", command], ["-l", "-i", "-c", command]] }
+        func run(_ path: String) -> String { "'\(path.replacingOccurrences(of: "'", with: "'\\''"))' \(arguments)" }
+        if let claudePath { return both(run(claudePath)) }
+        let installed = installPlaces.compactMap { chosenPath($0, environment: environment) }
+            .filter { FileManager.default.isExecutableFile(atPath: $0) }
+        return both(command) + installed.flatMap { both(run($0)) }
+    }
+
+    public static func read(now: @autoclosure () -> Date = Date(), timeout: TimeInterval = 90, claudePath: String? = nil,
+                            environment: [String: String] = ProcessInfo.processInfo.environment) throws -> UsageLimits {
+        let text = try run(timeout: timeout, claudePath: claudePath, environment: environment)
         guard let limits = UsageLimits.parse(text, now: now()) else {
             throw LimitsReaderError.unreadable(text.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return limits
     }
 
-    static func run(timeout: TimeInterval) throws -> String {
+    static func run(timeout: TimeInterval, claudePath: String?, environment: [String: String]) throws -> String {
+        if let claudePath, !FileManager.default.isExecutableFile(atPath: claudePath) {
+            throw LimitsReaderError.chosenPathMissing(claudePath)
+        }
+        var lastMessage = ""
+        for arguments in attempts(claudePath: claudePath, environment: environment) {
+            let result = try execute(arguments, timeout: timeout, environment: environment)
+            if result.status == 0 { return result.text }
+            lastMessage = result.message
+            guard result.status == commandNotFound else { throw LimitsReaderError.failed(lastMessage) }
+        }
+        throw claudePath == nil ? LimitsReaderError.notFound : LimitsReaderError.failed(lastMessage)
+    }
+
+    private static func execute(_ arguments: [String], timeout: TimeInterval, environment: [String: String]) throws -> (status: Int32, text: String, message: String) {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh")
-        p.arguments = ["-l", "-c", command]
+        p.environment = environment
+        p.executableURL = URL(fileURLWithPath: environment["SHELL"] ?? "/bin/zsh")
+        p.arguments = arguments
         p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         let out = Pipe()
         let err = Pipe()
@@ -245,10 +293,7 @@ public enum LimitsReader {
         p.waitUntilExit()
         deadline.cancel()
         let text = String(data: data, encoding: .utf8) ?? ""
-        guard p.terminationStatus == 0 else {
-            let message = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw LimitsReaderError.failed(message.isEmpty ? "exit \(p.terminationStatus)" : message)
-        }
-        return text
+        let message = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (p.terminationStatus, text, message.isEmpty ? "exit \(p.terminationStatus)" : message)
     }
 }

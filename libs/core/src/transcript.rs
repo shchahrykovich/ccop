@@ -49,6 +49,62 @@ pub struct Transcript {
     /// The lines of one answer are always next to each other in the file.
     #[serde(default)]
     last_answer: Option<LastAnswer>,
+    /// Set for a `fork` subagent's file.
+    #[serde(default)]
+    fork: Option<ForkCopy>,
+}
+
+/// A `fork` subagent's file starts with a copy of its parent's history, up to
+/// the message with the tool call that started the fork. The parent's file
+/// already counts those answers, and they are not the fork's work, so reading
+/// forgets them when it comes to that call. A file without that call stays
+/// counted as a whole: no tokens are lost if the format changes.
+/// Checked 2026-11-04: in 99 fork files, all 706 answers up to that call were
+/// also in another file of the session, and none of the 2293 after it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ForkCopy {
+    pub(crate) call: String,
+    /// The copied message's `message.id requestId`, once the copy has ended.
+    copied_answer: Option<String>,
+}
+
+/// What one answer line of a fork's file is.
+pub(crate) enum ForkLine {
+    /// The fork's own, or the copy goes on and it is not known yet.
+    Other,
+    /// The line with the call that started the fork: the copy ends here.
+    EndOfCopy,
+    /// Another line of that same message.
+    RestOfCopy,
+}
+
+impl ForkCopy {
+    pub(crate) fn new(call: &str) -> ForkCopy {
+        ForkCopy { call: call.to_string(), copied_answer: None }
+    }
+
+    pub(crate) fn ended(&self) -> bool {
+        self.copied_answer.is_some()
+    }
+
+    /// `key` is the line's `message.id requestId`.
+    pub(crate) fn read(&mut self, key: &str, holds_call: impl FnOnce(&str) -> bool) -> ForkLine {
+        if let Some(copied) = &self.copied_answer {
+            return if copied == key && !key.trim().is_empty() { ForkLine::RestOfCopy } else { ForkLine::Other };
+        }
+        if !holds_call(&self.call) {
+            return ForkLine::Other;
+        }
+        self.copied_answer = Some(key.to_string());
+        ForkLine::EndOfCopy
+    }
+}
+
+/// The content of an answer has a `tool_use` block with this id.
+pub(crate) fn calls_tool(content: &serde_json::Value, call: &str) -> bool {
+    content.as_array().is_some_and(|blocks| {
+        blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use") && b.get("id").and_then(|i| i.as_str()) == Some(call))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,6 +194,9 @@ impl Transcript {
             return;
         }
         let Ok(r) = serde_json::from_str::<Record>(line) else { return };
+        if self.is_fork_copy(line, &r) {
+            return;
+        }
         if let Some(t) = r.timestamp {
             self.started_at = Some(self.started_at.map_or(t, |s| s.min(t)));
             self.updated_at = Some(self.updated_at.map_or(t, |u| u.max(t)));
@@ -167,6 +226,43 @@ impl Transcript {
             Some("relocated") => self.cwd = r.relocated_cwd.or(self.cwd.take()),
             Some("continued-in") => self.continued_in = r.continued_in_session_id,
             _ => {}
+        }
+    }
+
+    /// Reads a `fork` subagent's file: `call` is the id of the tool call that
+    /// started it. See `ForkCopy`.
+    pub fn for_fork(call: &str) -> Transcript {
+        Transcript { fork: Some(ForkCopy::new(call)), ..Transcript::default() }
+    }
+
+    /// `for_fork` made this state.
+    pub fn reads_a_fork(&self) -> bool {
+        self.fork.is_some()
+    }
+
+    /// A line of the copy at the start of a fork's file. The last one forgets
+    /// what the lines before it added.
+    fn is_fork_copy(&mut self, line: &str, r: &Record) -> bool {
+        let Some(fork) = &mut self.fork else { return false };
+        if r.kind.as_deref() != Some("assistant") {
+            return false;
+        }
+        let m = r.message.as_ref();
+        let key = format!("{} {}", m.and_then(|m| m.id.as_deref()).unwrap_or_default(), r.request_id.as_deref().unwrap_or_default());
+        let holds_call = |call: &str| {
+            line.contains(call)
+                && m.and_then(|m| m.content.as_ref())
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(c.get()).ok())
+                    .is_some_and(|c| calls_tool(&c, call))
+        };
+        match fork.read(&key, holds_call) {
+            ForkLine::Other => false,
+            ForkLine::RestOfCopy => true,
+            ForkLine::EndOfCopy => {
+                let fork = self.fork.take();
+                *self = Transcript { fork, ..Transcript::default() };
+                true
+            }
         }
     }
 
@@ -323,6 +419,66 @@ mod tests {
             t.feed(l);
         }
         t
+    }
+
+    fn call(id: &str, request: &str, use_id: &str, at: &str) -> String {
+        json!({"type": "assistant", "requestId": request, "timestamp": at,
+               "message": {"id": id, "model": "opus", "content": [{"type": "tool_use", "id": use_id, "name": "Agent", "input": {}}],
+               "usage": {"input_tokens": 1, "cache_read_input_tokens": 500, "output_tokens": 9}}})
+        .to_string()
+    }
+
+    #[test]
+    fn a_fork_counts_only_what_comes_after_the_call_that_started_it() {
+        let mut t = Transcript::for_fork("toolu_1");
+        t.feed(&answer("old", "r0", "opus", 1, 0, 100, 5));
+        t.feed(&call("m1", "r1", "toolu_1", "2026-11-02T09:00:00Z"));
+        t.feed(&answer("new", "r2", "opus", 2, 0, 200, 7));
+        assert_eq!(t.usage["opus"], Usage { input_tokens: 2, cache_read_tokens: 200, output_tokens: 7, requests: 1, ..Usage::default() });
+        assert_eq!(t.cost_micros, crate::pricing::cost_micros("opus", &t.usage["opus"]));
+        assert_eq!(t.hours.values().map(|h| h.usage.requests).sum::<u64>(), 1);
+        // The time of the copied lines is the parent's time.
+        assert_eq!(t.started_at, Some("2026-11-02T10:00:05Z".parse().unwrap()));
+    }
+
+    #[test]
+    fn another_line_of_the_copied_message_is_not_counted() {
+        let mut t = Transcript::for_fork("toolu_1");
+        t.feed(&call("m1", "r1", "toolu_1", "2026-11-02T09:00:00Z"));
+        t.feed(&call("m1", "r1", "toolu_2", "2026-11-02T09:00:00Z"));
+        assert!(t.usage.is_empty());
+        t.feed(&answer("new", "r2", "opus", 2, 0, 200, 7));
+        assert_eq!(t.usage["opus"].requests, 1);
+    }
+
+    #[test]
+    fn a_fork_without_its_call_in_the_file_counts_every_line() {
+        let mut t = Transcript::for_fork("toolu_1");
+        t.feed(&answer("a", "r0", "opus", 1, 0, 100, 5));
+        t.feed(&call("b", "r1", "toolu_other", "2026-11-02T09:00:00Z"));
+        assert_eq!(t.usage["opus"].requests, 2);
+    }
+
+    #[test]
+    fn an_ordinary_file_counts_a_call_like_any_answer() {
+        let t = read(&[answer("a", "r0", "opus", 1, 0, 100, 5), call("b", "r1", "toolu_1", "2026-11-02T09:00:00Z")]);
+        assert_eq!(t.usage["opus"].requests, 2);
+    }
+
+    #[test]
+    fn a_fork_read_in_two_runs_gives_the_same_result() {
+        let lines = [answer("old", "r0", "opus", 1, 0, 100, 5), call("m1", "r1", "toolu_1", "2026-11-02T09:00:00Z"), call("m1", "r1", "toolu_2", "2026-11-02T09:00:00Z"), answer("new", "r2", "opus", 2, 0, 200, 7)];
+        for split in 0..=lines.len() {
+            let mut t = Transcript::for_fork("toolu_1");
+            for l in &lines[..split] {
+                t.feed(l);
+            }
+            let mut t: Transcript = serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+            for l in &lines[split..] {
+                t.feed(l);
+            }
+            assert_eq!(t.usage["opus"].requests, 1, "split at {split}");
+        }
     }
 
     #[test]

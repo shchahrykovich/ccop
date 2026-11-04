@@ -392,13 +392,28 @@ struct PlanSettingsView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "arrowtriangle.right.fill").font(.system(size: 7))
                         .rotationEffect(.degrees(manual ? 90 : 0))
-                    Text("Claude Code not found? Type the numbers yourself")
+                    Text("Claude Code not found? Choose its path or type the numbers")
                 }
                 .foregroundStyle(Theme.accent)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if manual {
+                HStack(spacing: 8) {
+                    Text("Path")
+                    TextField("", text: Binding(get: { model.claudePath }, set: { model.claudePath = $0 }),
+                              prompt: Text("Found by itself, for example ~/.local/bin/claude"))
+                        .textFieldStyle(.plain)
+                        .font(.mono(11.5))
+                        .padding(.horizontal, 6)
+                        .frame(height: 26)
+                        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.line))
+                        .onSubmit { model.readLimits() }
+                        .accessibilityLabel("Path to Claude Code")
+                    Button("Choose…", action: chooseClaude)
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 26, padding: 10, fontSize: 12))
+                }
                 HStack(spacing: 8) {
                     Text("Week")
                     TextField("", text: $percent, prompt: Text("87"))
@@ -429,6 +444,21 @@ struct PlanSettingsView: View {
             }
         }
         .font(.ui(12))
+        // The way out of the error above is in this section.
+        .onChange(of: model.limitsError) { _, error in if error != nil { manual = true } }
+        .onAppear { if model.limitsError != nil { manual = true } }
+    }
+
+    /// Hidden files are shown: Claude Code is often in `~/.local/bin`.
+    private func chooseClaude() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose the claude program"
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.claudePath = url.path
+        model.readLimits()
     }
 
     /// The reset moment: a weekday and a time; it repeats every 7 days.

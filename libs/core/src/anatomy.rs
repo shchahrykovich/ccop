@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::spend::{Refusal, refusal};
-use crate::transcript::prompt_text;
+use crate::transcript::{ForkCopy, ForkLine, calls_tool, prompt_text};
 use crate::usage::Usage;
 
 /// The longest text kept for a tool input or an answer's text.
@@ -195,9 +195,19 @@ pub struct LaneMeta {
     pub tool_use_id: Option<String>,
 }
 
+impl LaneMeta {
+    /// The id of the call that started this subagent, when it is a `fork`:
+    /// its file starts with a copy (see `ForkCopy`).
+    pub fn fork_call(&self) -> Option<&str> {
+        self.tool_use_id.as_deref().filter(|_| self.agent_type.as_deref() == Some("fork"))
+    }
+}
+
 /// Reads the lines of one lane's file.
 pub struct LaneReader {
     lane: Lane,
+    /// Set for a `fork` subagent's file.
+    fork: Option<ForkCopy>,
     /// The answer of the last usage line: `message.id requestId` and its event.
     answer: Option<(String, usize)>,
     /// Tool calls without a result yet: tool_use_id → event.
@@ -251,7 +261,8 @@ impl LaneReader {
 
     pub fn subagent(agent_id: &str, meta: LaneMeta) -> LaneReader {
         let name = meta.description.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| format!("Subagent {agent_id}"));
-        LaneReader::new(agent_id.into(), name, meta.agent_type, meta.tool_use_id)
+        let fork = meta.fork_call().map(ForkCopy::new);
+        LaneReader { fork, ..LaneReader::new(agent_id.into(), name, meta.agent_type, meta.tool_use_id) }
     }
 
     fn new(id: String, name: String, agent_type: Option<String>, tool_use_id: Option<String>) -> LaneReader {
@@ -271,6 +282,7 @@ impl LaneReader {
                 events: Vec::new(),
                 context: Vec::new(),
             },
+            fork: None,
             answer: None,
             pending: HashMap::new(),
             commands: HashMap::new(),
@@ -286,6 +298,9 @@ impl LaneReader {
             return;
         }
         let Ok(r) = serde_json::from_str::<Value>(line) else { return };
+        if self.is_fork_copy(&r) {
+            return;
+        }
         let Some(at) = r.get("timestamp").and_then(Value::as_str).and_then(|t| t.parse::<DateTime<Utc>>().ok()) else {
             return;
         };
@@ -298,6 +313,40 @@ impl LaneReader {
             Some("system") => self.system(&r, at),
             _ => {}
         }
+    }
+
+    /// A line of the copy at the start of a fork's file. The last one forgets
+    /// what the lines before it added.
+    fn is_fork_copy(&mut self, r: &Value) -> bool {
+        let Some(fork) = &mut self.fork else { return false };
+        if r.get("type").and_then(Value::as_str) != Some("assistant") {
+            return false;
+        }
+        let id = r["message"].get("id").and_then(Value::as_str).unwrap_or_default();
+        let request = r.get("requestId").and_then(Value::as_str).unwrap_or_default();
+        match fork.read(&format!("{id} {request}"), |call| calls_tool(&r["message"]["content"], call)) {
+            ForkLine::Other => false,
+            ForkLine::RestOfCopy => true,
+            ForkLine::EndOfCopy => {
+                let lane = &self.lane;
+                let fresh = LaneReader::new(lane.id.clone(), lane.name.clone(), lane.agent_type.clone(), lane.tool_use_id.clone());
+                let chat = self.chat.as_ref().map(|_| BTreeMap::new());
+                let fork = self.fork.take();
+                *self = LaneReader { fork, chat, ..fresh };
+                true
+            }
+        }
+    }
+
+    /// A fork's task is in the line after the copied call, next to that
+    /// call's result, after Claude Code's own rules for forks.
+    fn fork_task(&self, content: &Value) -> Option<String> {
+        let fork = self.fork.as_ref().filter(|f| f.ended() && self.lane.events.is_empty())?;
+        let parts = content.as_array()?;
+        parts.iter().find(|p| p.get("type").and_then(Value::as_str) == Some("tool_result") && p.get("tool_use_id").and_then(Value::as_str) == Some(fork.call.as_str()))?;
+        let text = parts.iter().filter(|p| p.get("type").and_then(Value::as_str) == Some("text")).filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n");
+        let task = text.rsplit_once("</fork-boilerplate>").map_or(text.as_str(), |(_, task)| task).trim();
+        Some(task.to_string()).filter(|t| !t.is_empty())
     }
 
     fn push(&mut self, kind: EventKind, start: DateTime<Utc>, end: DateTime<Utc>) -> usize {
@@ -425,6 +474,7 @@ impl LaneReader {
             .map(|parts| parts.iter().filter(|p| p.get("type").and_then(Value::as_str) == Some("tool_result")).collect())
             .unwrap_or_default();
         if !results.is_empty() {
+            let task = self.fork_task(content);
             let agent_id = r.get("toolUseResult").and_then(|t| t.get("agentId")).and_then(Value::as_str);
             for res in results {
                 let Some(id) = res.get("tool_use_id").and_then(Value::as_str) else { continue };
@@ -451,6 +501,13 @@ impl LaneReader {
                 }
             }
             self.last = Some(self.last.map_or(at, |l| l.max(at)));
+            if let Some(task) = task {
+                let i = self.push(EventKind::Prompt, at, at);
+                self.lane.events[i].text = Some(clip(&task, crate::transcript::PROMPT_CHARS));
+                if let Some(c) = self.chat_entry(i) {
+                    c.text = Some(task);
+                }
+            }
             return;
         }
         // Not a prompt, but the next model call goes out after it: a subagent's
@@ -517,6 +574,19 @@ impl LaneReader {
     }
 }
 
+/// `id` is the lane itself or one of the lanes above it. A lane with this
+/// parent would be its own ancestor, and the tree has no such loop.
+fn descends_from(lanes: &[Lane], lane: usize, id: &str) -> bool {
+    let mut current = Some(lane);
+    while let Some(i) = current {
+        if lanes[i].id == id {
+            return true;
+        }
+        current = lanes[i].parent.as_deref().and_then(|p| lanes.iter().position(|l| l.id == p));
+    }
+    false
+}
+
 /// The lanes of one session into its anatomy: links subagents to the tool
 /// calls that started them, and splits the main lane into turns.
 pub fn build(session_id: &str, main: Lane, mut subagents: Vec<Lane>) -> Anatomy {
@@ -524,22 +594,26 @@ pub fn build(session_id: &str, main: Lane, mut subagents: Vec<Lane>) -> Anatomy 
     let mut lanes = vec![main];
     lanes.extend(subagents);
 
-    // tool_use_id → (lane index, event index), and agent id → the same.
-    let mut by_use: HashMap<String, (usize, usize)> = HashMap::new();
-    let mut by_agent: HashMap<String, (usize, usize)> = HashMap::new();
+    // tool_use_id → every (lane index, event index) with that call, and agent
+    // id → the same. A `fork` subagent's file starts with a copy of the message
+    // that started it, so one call can be in several lanes. Main comes first and
+    // the others by start, so the first lane is the one that made the call.
+    let mut by_use: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    let mut by_agent: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
     for (l, lane) in lanes.iter().enumerate() {
         for (e, ev) in lane.events.iter().enumerate() {
             if let Some(u) = &ev.tool_use_id {
-                by_use.insert(u.clone(), (l, e));
+                by_use.entry(u.clone()).or_default().push((l, e));
             }
             if let Some(a) = &ev.agent_id {
-                by_agent.insert(a.clone(), (l, e));
+                by_agent.entry(a.clone()).or_default().push((l, e));
             }
         }
     }
     for l in 1..lanes.len() {
         let id = lanes[l].id.clone();
-        let found = lanes[l].tool_use_id.as_ref().and_then(|u| by_use.get(u)).or_else(|| by_agent.get(&id)).copied();
+        let usable = |places: &Vec<(usize, usize)>| places.iter().copied().find(|(pl, _)| !descends_from(&lanes, *pl, &id));
+        let found = lanes[l].tool_use_id.as_ref().and_then(|u| by_use.get(u)).and_then(usable).or_else(|| by_agent.get(&id).and_then(usable));
         if let Some((pl, pe)) = found {
             lanes[l].parent = Some(lanes[pl].id.clone());
             let use_id = lanes[pl].events[pe].tool_use_id.clone();
@@ -1001,6 +1075,125 @@ mod tests {
         assert_eq!(a.lanes[0].events[2].agent_id.as_deref(), Some("a9"));
         // The tool call has no result yet: it has no size.
         assert_eq!(a.lanes[0].events[2].result_bytes, None);
+    }
+
+    fn agent_call(id: &str) -> Value {
+        json!({"type": "tool_use", "id": id, "name": "Agent", "input": {"description": "Audit"}})
+    }
+
+    fn meta(agent_type: &str, id: &str, use_id: &str) -> LaneMeta {
+        serde_json::from_str(&format!(r#"{{"agentType":"{agent_type}","description":"Agent {id}","toolUseId":"{use_id}"}}"#)).unwrap()
+    }
+
+    /// A fork's file starts with a copy of the message that started it.
+    fn fork(id: &str, use_id: &str, copied: &Value) -> Lane {
+        lane(LaneReader::subagent(id, meta("fork", id, use_id)), &[copied.clone(), answer("00:03", &format!("s{id}"), 1, json!([]))])
+    }
+
+    /// Not marked as a fork, so its copy stays in the lane and only `build` can
+    /// keep the tree right.
+    fn holder_of_a_copy(id: &str, use_id: &str, copied: &Value) -> Lane {
+        lane(LaneReader::subagent(id, meta("general-purpose", id, use_id)), &[copied.clone(), answer("00:03", &format!("s{id}"), 1, json!([]))])
+    }
+
+    /// The line after the copied call: its result and the fork's task.
+    fn fork_task(t: &str, use_id: &str, task: &str) -> Value {
+        json!({"type": "user", "timestamp": format!("2026-11-02T10:{t}Z"), "isSidechain": true,
+               "message": {"content": [
+                   {"type": "tool_result", "tool_use_id": use_id, "content": [{"type": "text", "text": "Fork started"}]},
+                   {"type": "text", "text": format!("<fork-boilerplate>\nYou are a worker fork.\n</fork-boilerplate>\n\n{task}")}]}})
+    }
+
+    #[test]
+    fn a_fork_lane_holds_its_task_and_its_own_work_and_not_the_copy() {
+        let lines = [
+            prompt("00:00", "history of the parent"),
+            answer("00:01", "old", 50, json!([{"type": "tool_use", "id": "toolu_old", "name": "Read", "input": {}}])),
+            result("00:02", "toolu_old", "text", true, json!({})),
+            answer("00:03", "m1", 60, json!([agent_call("toolu_1")])),
+            fork_task("05:00", "toolu_1", "Audit chapters 1-9."),
+            answer("05:30", "s1", 7, json!([{"type": "text", "text": "Done."}])),
+        ];
+        let mut reader = LaneReader::subagent("a1", meta("fork", "a1", "toolu_1")).with_chat();
+        for l in &lines {
+            reader.feed(&l.to_string());
+        }
+        let (s, chat) = reader.finish_with_chat();
+        assert_eq!(s.events.iter().map(|e| e.kind).collect::<Vec<_>>(), [EventKind::Prompt, EventKind::Answer]);
+        assert_eq!(s.events[0].text.as_deref(), Some("Audit chapters 1-9."));
+        assert_eq!((s.usage.requests, s.usage.output_tokens, s.tool_calls, s.errors), (1, 7, 0, 0));
+        assert_eq!((s.started_at, s.ended_at), (Some(at("05:00")), Some(at("05:30"))));
+        // The chat has the same event indices as the lane.
+        assert_eq!(chat[0].event, 0);
+        assert_eq!(chat[0].text.as_deref(), Some("Audit chapters 1-9."));
+        assert_eq!((chat[1].event, chat[1].text.as_deref()), (1, Some("Done.")));
+    }
+
+    #[test]
+    fn another_line_of_the_copied_message_is_not_counted_in_the_lane() {
+        let lines = [
+            answer("00:01", "m1", 60, json!([agent_call("toolu_1")])),
+            answer("00:01", "m1", 60, json!([agent_call("toolu_2")])),
+            fork_task("05:00", "toolu_1", "Audit."),
+            answer("05:30", "s1", 7, json!([])),
+        ];
+        let s = lane(LaneReader::subagent("a1", meta("fork", "a1", "toolu_1")), &lines);
+        assert_eq!((s.usage.requests, s.tool_calls), (1, 0));
+    }
+
+    #[test]
+    fn a_fork_without_its_call_in_the_file_keeps_all_its_lines() {
+        let lines = [answer("00:01", "m1", 60, json!([])), answer("00:02", "m2", 7, json!([]))];
+        let s = lane(LaneReader::subagent("a1", meta("fork", "a1", "toolu_1")), &lines);
+        assert_eq!(s.usage.requests, 2);
+    }
+
+    #[test]
+    fn only_a_fork_drops_the_lines_before_its_call() {
+        let lines = [answer("00:01", "old", 60, json!([])), answer("00:02", "m1", 7, json!([agent_call("toolu_1")]))];
+        let s = lane(LaneReader::subagent("a1", meta("general-purpose", "a1", "toolu_1")), &lines);
+        assert_eq!(s.usage.requests, 2);
+    }
+
+    fn parent_of<'a>(a: &'a Anatomy, id: &str) -> Option<&'a str> {
+        a.lanes.iter().find(|l| l.id == id).unwrap().parent.as_deref()
+    }
+
+    #[test]
+    fn a_fork_with_a_copy_of_its_own_call_stays_under_the_agent_that_started_it() {
+        let spawn = answer("00:01", "m1", 1, json!([agent_call("toolu_1"), agent_call("toolu_2")]));
+        let main = lane(LaneReader::main(), &[prompt("00:00", "go"), spawn.clone()]);
+        let a = build("s", main, vec![fork("a1", "toolu_1", &spawn), fork("a2", "toolu_2", &spawn)]);
+        assert_eq!(parent_of(&a, "a1"), Some("main"));
+        assert_eq!(parent_of(&a, "a2"), Some("main"));
+        // The link goes to the real call, not to a fork's copy of it.
+        assert_eq!(a.lanes[0].events[2].agent_id.as_deref(), Some("a1"));
+        assert_eq!(a.lanes[0].events[3].agent_id.as_deref(), Some("a2"));
+    }
+
+    #[test]
+    fn a_lane_with_a_copy_of_a_call_does_not_take_it_from_the_lane_that_made_it() {
+        let spawn = answer("00:01", "m1", 1, json!([agent_call("toolu_1"), agent_call("toolu_2")]));
+        let main = lane(LaneReader::main(), &[prompt("00:00", "go"), spawn.clone()]);
+        let a = build("s", main, vec![holder_of_a_copy("a1", "toolu_1", &spawn), holder_of_a_copy("a2", "toolu_2", &spawn)]);
+        assert_eq!(parent_of(&a, "a1"), Some("main"));
+        assert_eq!(parent_of(&a, "a2"), Some("main"));
+    }
+
+    #[test]
+    fn lanes_whose_parent_file_is_gone_do_not_become_each_others_ancestors() {
+        let spawn = answer("00:01", "m1", 1, json!([agent_call("toolu_1"), agent_call("toolu_2")]));
+        let main = lane(LaneReader::main(), &[prompt("00:00", "go")]);
+        let a = build("s", main, vec![holder_of_a_copy("a1", "toolu_1", &spawn), holder_of_a_copy("a2", "toolu_2", &spawn)]);
+        for lane in &a.lanes {
+            let mut seen = vec![lane.id.as_str()];
+            let mut parent = lane.parent.as_deref();
+            while let Some(p) = parent.filter(|p| *p != "main") {
+                assert!(!seen.contains(&p), "{} is its own ancestor: {seen:?}", lane.id);
+                seen.push(p);
+                parent = parent_of(&a, p);
+            }
+        }
     }
 
     #[test]

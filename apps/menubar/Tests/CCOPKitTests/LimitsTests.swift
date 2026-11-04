@@ -107,6 +107,72 @@ final class LimitsTests: XCTestCase {
         XCTAssertEqual(s.resetAnchor, d("2026-11-05T18:00:00Z"))
     }
 
+    /// A home folder with a made-up `claude` that prints one limit, and the
+    /// environment of an app opened from Finder: a short PATH.
+    private func fakeHome(claudeAt path: String, zshrc: String? = nil) throws -> (home: URL, environment: [String: String]) {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        let claude = home.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: claude.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\necho 'Current week (all models): 12% used'\n".write(to: claude, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
+        if let zshrc { try zshrc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8) }
+        return (home, ["HOME": home.path, "ZDOTDIR": home.path, "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"])
+    }
+
+    func testClaudeThatOnlyAnInteractiveShellFindsIsRead() throws {
+        let (_, env) = try fakeHome(claudeAt: "tools/claude", zshrc: "export PATH=\"$HOME/tools:$PATH\"\n")
+        let limits = try LimitsReader.read(environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testClaudeFromAnAliasInTheShellFileIsRead() throws {
+        let (_, env) = try fakeHome(claudeAt: "tools/claude", zshrc: "alias claude=\"$HOME/tools/claude\"\n")
+        let limits = try LimitsReader.read(environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testClaudeThatNoShellFindsIsReadFromItsInstallFolder() throws {
+        let (_, env) = try fakeHome(claudeAt: ".local/bin/claude")
+        let limits = try LimitsReader.read(environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testNoClaudeAnywhereSaysSoInPlainWords() throws {
+        let (_, env) = try fakeHome(claudeAt: "elsewhere/claude")
+        XCTAssertThrowsError(try LimitsReader.read(environment: env)) { error in
+            XCTAssertEqual(error as? LimitsReaderError, .notFound)
+            XCTAssertFalse(error.localizedDescription.contains("zsh:"))
+        }
+    }
+
+    func testAChosenPathIsUsedEvenWhenNoShellFindsClaude() throws {
+        let (home, env) = try fakeHome(claudeAt: "elsewhere/claude")
+        let limits = try LimitsReader.read(claudePath: home.appendingPathComponent("elsewhere/claude").path, environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testAChosenPathWithASpaceAndAQuoteIsUsed() throws {
+        let (home, env) = try fakeHome(claudeAt: "my tools's/claude")
+        let limits = try LimitsReader.read(claudePath: home.appendingPathComponent("my tools's/claude").path, environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testAChosenPathThatIsGoneIsAnErrorAndNotAnotherClaude() throws {
+        let (home, env) = try fakeHome(claudeAt: ".local/bin/claude")
+        let gone = home.appendingPathComponent("versions/2.1.0").path
+        XCTAssertThrowsError(try LimitsReader.read(claudePath: gone, environment: env)) { error in
+            XCTAssertEqual(error as? LimitsReaderError, .chosenPathMissing(gone))
+        }
+    }
+
+    func testATypedPathIsCleanedUp() {
+        let env = ["HOME": "/Users/demo"]
+        XCTAssertEqual(LimitsReader.chosenPath(" ~/bin/claude \n", environment: env), "/Users/demo/bin/claude")
+        XCTAssertEqual(LimitsReader.chosenPath("/opt/claude", environment: env), "/opt/claude")
+        XCTAssertNil(LimitsReader.chosenPath("   ", environment: env))
+    }
+
     func testAReadSavesNoSession() {
         // Without the flag each read left a "/usage" session with 0 tokens
         // in ~/.claude/projects, and it showed in the session list.

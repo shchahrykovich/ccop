@@ -128,6 +128,22 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertEqual(a.depth(of: a.lanes[1]), 1)
         XCTAssertEqual(a.depth(of: a.lanes[0]), 0)
     }
+
+    /// A row is indented by its depth, so a wrong depth pushes the row out of the window.
+    func testALaneThatIsItsOwnParentIsNotDeep() throws {
+        var a = try Anatomy.decode(Data(contentsOf: Self.example))
+        a.lanes[1].parent = a.lanes[1].id
+        XCTAssertEqual(a.depth(of: a.lanes[1]), 1)
+    }
+
+    func testAChainOfSubagentsKeepsItsDepth() throws {
+        var a = try Anatomy.decode(Data(contentsOf: Self.example))
+        var child = a.lanes[1]
+        child.id = "a2"
+        child.parent = a.lanes[1].id
+        a.lanes.append(child)
+        XCTAssertEqual(a.depth(of: child), 2)
+    }
 }
 
 final class TimeScaleTests: XCTestCase {

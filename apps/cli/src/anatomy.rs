@@ -20,12 +20,8 @@ pub fn read(session_id: &str, transcript: &Path) -> Result<Anatomy> {
             let name = item.file_name().to_string_lossy().into_owned();
             let Some(stem) = name.strip_suffix(".jsonl") else { continue };
             let agent_id = stem.strip_prefix("agent-").unwrap_or(stem);
-            let meta: LaneMeta = fs::read(dir.join(format!("{stem}.meta.json")))
-                .ok()
-                .and_then(|b| serde_json::from_slice(&b).ok())
-                .unwrap_or_default();
             // A subagent file that cannot be read is left out.
-            if let Ok(lane) = read_lane(&item.path(), LaneReader::subagent(agent_id, meta)) {
+            if let Ok(lane) = read_lane(&item.path(), LaneReader::subagent(agent_id, lane_meta(&item.path()))) {
                 subagents.push(lane);
             }
         }
@@ -66,6 +62,11 @@ pub fn rollup(sessions: &[&ccop_core::Session]) -> (Rollup, u64) {
 }
 
 /// The file of one lane: `main`, or a subagent's id.
+/// What the `.meta.json` beside a subagent's file says; empty when there is none.
+pub fn lane_meta(file: &Path) -> LaneMeta {
+    fs::read(file.with_extension("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
 fn lane_file(transcript: &Path, lane: &str) -> std::path::PathBuf {
     if lane == "main" {
         transcript.to_path_buf()
@@ -94,7 +95,8 @@ pub struct ChatOut {
 /// The full texts of one lane's events; their tokens are in the anatomy.
 pub fn chat(transcript: &Path, lane: &str) -> Result<ChatOut> {
     let path = lane_file(transcript, lane);
-    let reader = if lane == "main" { LaneReader::main() } else { LaneReader::subagent(lane, LaneMeta::default()) };
+    // The same reader as the anatomy's, so that the event indices are the same.
+    let reader = if lane == "main" { LaneReader::main() } else { LaneReader::subagent(lane, lane_meta(&path)) };
     let mut reader = reader.with_chat();
     for_each_line(&path, |l| {
         reader.feed(l);

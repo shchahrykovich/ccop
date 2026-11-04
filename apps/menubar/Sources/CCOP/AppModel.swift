@@ -138,6 +138,10 @@ final class AppModel {
     var autoReadLimits = UserDefaults.standard.object(forKey: "autoReadLimits") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoReadLimits, forKey: "autoReadLimits") }
     }
+    /// The path to Claude Code that a person chose. Empty: ccop looks for it.
+    var claudePath = UserDefaults.standard.string(forKey: LimitsReader.pathDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(claudePath, forKey: LimitsReader.pathDefaultsKey) }
+    }
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     /// The Team ID this app is signed with; nil for a local (ad-hoc) build.
     @ObservationIgnored private let teamID = Updater.teamIdentifier(of: Bundle.main.bundleURL)
@@ -177,8 +181,9 @@ final class AppModel {
         guard !limitsReading else { return }
         limitsReading = true
         lastLimitsTry = Date()
+        let claudePath = LimitsReader.chosenPath(claudePath)
         Task.detached(priority: .utility) {
-            let result = Result { try LimitsReader.read() }
+            let result = Result { try LimitsReader.read(claudePath: claudePath) }
             await MainActor.run {
                 self.limitsReading = false
                 switch result {

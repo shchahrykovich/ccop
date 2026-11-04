@@ -69,6 +69,69 @@ fn total(s: &Value) -> u64 {
     ["input_tokens", "cache_write_tokens", "cache_read_tokens", "output_tokens"].iter().map(|k| u[k].as_u64().unwrap()).sum()
 }
 
+/// The file of a `fork` subagent: one copied answer, a copy of the call that
+/// started it with the result and the task, then its own answer.
+fn fork_lines(at: &str) -> (String, String) {
+    let copied_call = json!({"type": "assistant", "requestId": "req-m1", "timestamp": "2026-11-02T09:59:00Z",
+        "message": {"id": "m1", "model": "claude-opus-5-5",
+            "content": [{"type": "tool_use", "id": "toolu_1", "name": "Agent", "input": {"description": "Audit"}}],
+            "usage": {"input_tokens": 1, "cache_read_input_tokens": 1000, "output_tokens": 50}}})
+    .to_string();
+    let task = json!({"type": "user", "isSidechain": true, "timestamp": at, "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "Fork started"},
+        {"type": "text", "text": "<fork-boilerplate>rules</fork-boilerplate>\n\nAudit part one."}]}})
+    .to_string();
+    (format!("{}{copied_call}\n", answer("old", "claude-opus-5-5", 1000, 40, "2026-11-02T09:58:00Z")), format!("{task}\n{}", answer("own", "claude-opus-5-5", 300, 6, at)))
+}
+
+const FORK_META: &str = r#"{"agentType":"fork","description":"Audit","toolUseId":"toolu_1"}"#;
+
+#[test]
+fn a_fork_counts_its_own_work_in_the_totals_the_tree_and_the_chat() {
+    let h = Home::new();
+    let main_call = json!({"type": "assistant", "requestId": "req-m1", "timestamp": "2026-11-02T09:59:00Z",
+        "message": {"id": "m1", "model": "claude-opus-5-5",
+            "content": [{"type": "tool_use", "id": "toolu_1", "name": "Agent", "input": {"description": "Audit"}}],
+            "usage": {"input_tokens": 1, "cache_read_input_tokens": 1000, "output_tokens": 50}}})
+    .to_string();
+    append(&h.file("-p/s1.jsonl"), &format!("{}{main_call}\n", user("go", "2026-11-02T09:57:00Z")));
+    let (copy, own) = fork_lines("2026-11-02T10:00:00Z");
+    fs::write(h.file("-p/s1/subagents/agent-f1.meta.json"), FORK_META).unwrap();
+    append(&h.file("-p/s1/subagents/agent-f1.jsonl"), &format!("{copy}{own}"));
+
+    let s = h.sessions();
+    assert_eq!(s[0]["subagent_usage"]["requests"], 1);
+    assert_eq!(s[0]["subagent_usage"]["output_tokens"], 6);
+
+    let a = json_of(&h, &["anatomy", "s1", "--json"]);
+    let fork = a["lanes"].as_array().unwrap().iter().find(|l| l["id"] == "f1").unwrap();
+    assert_eq!(fork["parent"], "main");
+    assert_eq!(fork["usage"]["requests"], 1);
+    assert_eq!(fork["tool_calls"], 0);
+    assert_eq!(fork["events"][0]["text"], "Audit part one.");
+
+    // `ccop chat` must find the events at the indices of the anatomy.
+    let chat = json_of(&h, &["chat", "s1", "--lane", "f1", "--json"]);
+    assert_eq!(chat["texts"][0]["event"], 0);
+    assert_eq!(chat["texts"][0]["text"], "Audit part one.");
+}
+
+#[test]
+fn a_fork_read_before_its_meta_file_exists_is_counted_right_later() {
+    let h = Home::new();
+    append(&h.file("-p/s1.jsonl"), &user("go", "2026-11-02T09:57:00Z"));
+    let (copy, own) = fork_lines("2026-11-02T10:00:00Z");
+    let file = h.file("-p/s1/subagents/agent-f1.jsonl");
+    append(&file, &copy);
+    assert_eq!(h.sessions()[0]["subagent_usage"]["requests"], 2);
+
+    fs::write(h.file("-p/s1/subagents/agent-f1.meta.json"), FORK_META).unwrap();
+    append(&file, &own);
+    let s = h.sessions();
+    assert_eq!(s[0]["subagent_usage"]["requests"], 1);
+    assert_eq!(s[0]["subagent_usage"]["output_tokens"], 6);
+}
+
 #[test]
 fn a_session_with_its_subagents_and_the_newest_first() {
     let h = Home::new();
