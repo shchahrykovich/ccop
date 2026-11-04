@@ -32,7 +32,12 @@ final class AppModel {
     }
     /// The main window is shown: refresh as often as with the popover open.
     var windowOpen = false {
-        didSet { if windowOpen, !oldValue, !paused { refresh() } }
+        didSet {
+            if windowOpen, !oldValue {
+                showLatestInWindow()
+                if !paused { refresh() }
+            }
+        }
     }
     /// The session and tab shown in the main window (apart from the popover's).
     var windowSelectedID: String? {
@@ -42,6 +47,7 @@ final class AppModel {
                 chatTarget = nil
                 chatEvent = nil
                 causeID = nil
+                showLatestInWindow()
             }
             noteWindowPlace()
         }
@@ -68,6 +74,7 @@ final class AppModel {
     var windowTab: DetailTab = .overview {
         didSet {
             if windowTab != .chat { chatEvent = nil }
+            if windowTab != oldValue { showLatestInWindow() }
             noteWindowPlace()
         }
     }
@@ -96,6 +103,16 @@ final class AppModel {
     @ObservationIgnored var openPlanSettings: (() -> Void)?
     /// Anatomies loaded, by session id, and the ones loading now.
     private(set) var anatomies: [String: AnatomyState] = [:]
+    /// What the window's tab shows: the session and its anatomy when the user
+    /// came to the tab. A refresh does not change them, so the tab keeps its
+    /// numbers and its scroll position; `windowHasUpdates` says that there is
+    /// more. They are copies, because the popover loads into `anatomies`.
+    private(set) var windowShown: Session?
+    private(set) var windowAnatomy: AnatomyState?
+    /// A read of the anatomy for the tab is running.
+    private(set) var windowUpdating = false
+    /// Only the newest read for the tab may fill it.
+    @ObservationIgnored private var windowLoads = 0
     /// Set by StatusItemController: opens the main window at a session and tab.
     @ObservationIgnored var openWindow: ((String?, DetailTab?) -> Void)?
 
@@ -205,6 +222,7 @@ final class AppModel {
                     self.sessions = list
                     self.error = nil
                     self.loadedAt = Date()
+                    self.followListInWindow()
                 case let .failure(e):
                     self.error = e.localizedDescription
                 }
@@ -235,9 +253,28 @@ final class AppModel {
 
     var activeCount: Int { sessions.filter(\.active).count }
 
+    /// The new model calls and prompts the tab does not show. It can be 0 with
+    /// updates there: a tool result changes the file before the next call.
+    var windowUpdateCount: UInt64 {
+        guard windowHasUpdates, let shown = windowShown, let latest = windowSelected else { return 0 }
+        return latest.changes(since: shown)
+    }
+
+    /// The list has newer data of the session than the tab shows.
+    var windowHasUpdates: Bool {
+        guard let shown = windowShown, let latest = windowSelected, latest.id == shown.id else { return false }
+        return latest.modifiedAt > shown.modifiedAt
+    }
+
     var windowSelected: Session? {
         // `--window <id-prefix>` gives a prefix.
         windowSelectedID.flatMap { id in sessions.first { $0.id == id } ?? sessions.first { $0.id.hasPrefix(id) } }
+    }
+
+    /// A click on a session in the window's list. A click on the session that
+    /// is already chosen goes to its Overview.
+    func chooseInWindow(_ id: String) {
+        if id == windowSelected?.id { windowTab = .overview } else { windowSelectedID = id }
     }
 
     func toggleFlag(_ s: Session) {
@@ -257,12 +294,72 @@ final class AppModel {
         anatomies[s.id] = .loading
         let id = s.id
         Task.detached(priority: .userInitiated) {
+            let started = Date()
             let result = Result { try source.anatomy(id) }
             await MainActor.run {
                 switch result {
-                case let .success(a): self.anatomies[id] = .loaded(a, Date())
+                case let .success(a): self.anatomies[id] = .loaded(a, started)
                 case let .failure(e): self.anatomies[id] = .failed(e.localizedDescription)
                 }
+            }
+        }
+    }
+
+    /// Shows the newest data of the chosen session in the tab: the user came
+    /// to a tab or a session, or asked for the update.
+    func showLatestInWindow() {
+        let old = windowShown
+        windowShown = windowSelected
+        guard let s = windowShown else {
+            clearWindowAnatomy()
+            return
+        }
+        if old?.id != s.id { clearWindowAnatomy() }
+        if windowUpdating, old?.modifiedAt == s.modifiedAt { return }
+        loadWindowAnatomy(s)
+    }
+
+    /// A new list keeps the tab as it is, unless its session is gone or the
+    /// session chosen earlier is in the list only now.
+    private func followListInWindow() {
+        if windowShown?.id != windowSelected?.id { showLatestInWindow() }
+    }
+
+    private func clearWindowAnatomy() {
+        windowLoads += 1
+        windowUpdating = false
+        windowAnatomy = nil
+    }
+
+    /// The tab keeps its old anatomy until the new one is read, so an update
+    /// does not take it away for a spinner.
+    private func loadWindowAnatomy(_ s: Session) {
+        windowLoads += 1
+        if case let .loaded(_, at) = anatomies[s.id], at >= s.modifiedAt {
+            windowUpdating = false
+            windowAnatomy = anatomies[s.id]
+            return
+        }
+        guard let source else {
+            windowAnatomy = .failed(SessionSourceError.cliNotFound.localizedDescription)
+            return
+        }
+        windowUpdating = true
+        if case .loaded = windowAnatomy {} else { windowAnatomy = .loading }
+        let id = s.id
+        let load = windowLoads
+        Task.detached(priority: .userInitiated) {
+            let started = Date()
+            let result = Result { try source.anatomy(id) }
+            await MainActor.run {
+                let state: AnatomyState = switch result {
+                case let .success(a): .loaded(a, started)
+                case let .failure(e): .failed(e.localizedDescription)
+                }
+                self.anatomies[id] = state
+                guard load == self.windowLoads else { return }
+                self.windowUpdating = false
+                self.windowAnatomy = state
             }
         }
     }
@@ -482,7 +579,7 @@ final class AppModel {
 
 enum AnatomyState {
     case loading
-    /// The anatomy, and when it was loaded.
+    /// The anatomy, and when its read started: a change after that is not in it.
     case loaded(Anatomy, Date)
     case failed(String)
 }

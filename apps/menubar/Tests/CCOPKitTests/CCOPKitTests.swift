@@ -175,6 +175,26 @@ final class SessionListTests: XCTestCase {
 }
 
 final class FormatTests: XCTestCase {
+    func testChangesKeepTheFirstDigitAndShowAPlusWhenRounded() {
+        let cases: [(UInt64, String)] = [
+            (1, "1"), (9, "9"), (10, "10"), (13, "10+"), (80, "80"), (87, "80+"),
+            (100, "100"), (101, "100+"), (999, "900+"),
+            (1000, "1K"), (1500, "1K+"), (12345, "10K+"), (99999, "90K+"),
+            (2_000_000, "2M"), (2_400_000, "2M+"), (45_000_000, "40M+"),
+        ]
+        for (n, text) in cases { XCTAssertEqual(Format.changes(n), text) }
+    }
+
+    func testChangesAreNeverLongerThanFourCharacters() {
+        // "100K+" would be 5.
+        XCTAssertEqual(Format.changes(100_000), "99K+")
+        XCTAssertEqual(Format.changes(999_999), "99K+")
+        XCTAssertEqual(Format.changes(100_000_000), "99M+")
+        for n: UInt64 in [0, 7, 999, 1000, 99999, 100_000, 999_999, 1_000_000, 99_999_999, .max] {
+            XCTAssertLessThanOrEqual(Format.changes(n).count, 4, "\(n)")
+        }
+    }
+
     func testTokensMatchTheRustRules() {
         XCTAssertEqual([812, 46355, 999_499, 999_600, 9_311_043, 9_960_000, 46_000_000, 1_234_000_000].map(Format.tokens),
                        ["812", "46K", "999K", "1.0M", "9.3M", "10M", "46M", "1.2B"])

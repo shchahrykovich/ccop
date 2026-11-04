@@ -14,13 +14,18 @@ struct SessionDetailView: View {
 
     var body: some View {
         Group {
-            if inWindow { overview } else { popover }
+            if inWindow {
+                overview
+            } else {
+                popover
+                    .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
+            }
         }
-        .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
     }
 
     private var anatomy: Anatomy? {
-        if case let .loaded(a, _) = model.anatomies[session.id] { return a }
+        // In the window, the anatomy of the tab: new data does not change it.
+        if case let .loaded(a, _) = inWindow ? model.windowAnatomy : model.anatomies[session.id] { return a }
         return nil
     }
 
@@ -423,6 +428,7 @@ struct UsageTable: View {
 /// opens one agent's chat.
 struct SubagentTree: View {
     @Environment(AppModel.self) private var model
+    @State private var sort = TableSort<Column>()
     let anatomy: Anatomy
     @State private var showAll = false
     @State private var shownCall: CallRef?
@@ -435,7 +441,8 @@ struct SubagentTree: View {
     }
 
     var body: some View {
-        let lanes = anatomy.lanesInTreeOrder.filter { $0.id != "main" }
+        let tree = anatomy.lanesInTreeOrder.filter { $0.id != "main" }
+        let lanes = sort.sorted(tree, ascending: Self.ascending)
         let shown = showAll ? lanes : Array(lanes.prefix(Self.firstRows))
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -450,17 +457,20 @@ struct SubagentTree: View {
             let widths = Widths(lines, hasLimit: hasLimit)
             VStack(alignment: .leading, spacing: 0) {
                 columns(widths) {
-                    Text("Agent")
+                    SortTitle(title: "Agent", column: Column.agent, sort: $sort, alignment: .leading)
                 } cells: {
-                    Text("Model").frame(width: widths.model, alignment: .leading)
-                    Text("Start").frame(width: widths.start, alignment: .trailing)
-                    Text("Time").frame(width: widths.time, alignment: .trailing)
-                    Text("Tokens").frame(width: widths.tokens, alignment: .trailing)
-                    Text("Tools").frame(width: widths.tools, alignment: .trailing)
-                    Text("Cost").frame(width: widths.cost, alignment: .trailing)
+                    SortTitle(title: "Model", column: Column.model, sort: $sort, alignment: .leading)
+                        .frame(width: widths.model, alignment: .leading)
+                    SortTitle(title: "Start", column: Column.start, sort: $sort).frame(width: widths.start, alignment: .trailing)
+                    SortTitle(title: "Time", column: Column.time, sort: $sort).frame(width: widths.time, alignment: .trailing)
+                    SortTitle(title: "Tokens", column: Column.tokens, sort: $sort).frame(width: widths.tokens, alignment: .trailing)
+                    SortTitle(title: "Tools", column: Column.tools, sort: $sort).frame(width: widths.tools, alignment: .trailing)
+                    SortTitle(title: "Cost", column: Column.cost, sort: $sort).frame(width: widths.cost, alignment: .trailing)
                     if hasLimit {
-                        Text("Day limit").frame(width: widths.day, alignment: .trailing).help(Plan.limitShareHelp)
-                        Text("Week limit").frame(width: widths.week, alignment: .trailing).help(Plan.limitShareHelp)
+                        SortTitle(title: "Day limit", column: Column.day, sort: $sort, help: Plan.limitShareHelp)
+                            .frame(width: widths.day, alignment: .trailing)
+                        SortTitle(title: "Week limit", column: Column.week, sort: $sort, help: Plan.limitShareHelp)
+                            .frame(width: widths.week, alignment: .trailing)
                     }
                     Color.clear.frame(width: Self.buttonSize, height: 1)
                 }
@@ -488,6 +498,21 @@ struct SubagentTree: View {
     }
 
     private static let buttonSize: CGFloat = 22
+
+    private enum Column { case agent, model, start, time, tokens, tools, cost, day, week }
+
+    private static func ascending(_ column: Column, _ a: AnatomyLane, _ b: AnatomyLane) -> Bool {
+        switch column {
+        case .agent: a.name.localizedStandardCompare(b.name) == .orderedAscending
+        case .model: (a.model ?? "") < (b.model ?? "")
+        case .start: (a.startedAt ?? .distantPast) < (b.startedAt ?? .distantPast)
+        case .time: a.duration < b.duration
+        case .tokens: a.usage.total < b.usage.total
+        case .tools: a.toolCalls < b.toolCalls
+        // A session's limits are shares of the cost.
+        case .cost, .day, .week: a.costMicros < b.costMicros
+        }
+    }
 
     /// The agent's column takes the room the others leave.
     private func columns(_ widths: Widths, @ViewBuilder agent: () -> some View, @ViewBuilder cells: () -> some View) -> some View {
@@ -531,7 +556,7 @@ struct SubagentTree: View {
             let plain = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .regular)
             let bold = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .medium)
             func width(_ name: String, _ font: NSFont, _ value: (Line) -> String) -> CGFloat {
-                max(textWidth(name, title), lines.map { textWidth(value($0), font) }.max() ?? 0)
+                max(textWidth(name, title) + SortTitle<Column>.arrowRoom, lines.map { textWidth(value($0), font) }.max() ?? 0)
             }
             model = width("Model", plain) { $0.model }
             start = width("Start", plain) { $0.start }
@@ -582,6 +607,7 @@ struct SubagentTree: View {
         .monospacedDigit()
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+        .hoverRow()
         .rowMenu(view: spawn.flatMap { place in
                      anatomy.lane(place.lane)?.events[place.event].hasFullCall == true
                          ? { shownCall = CallRef(lane: place.lane, index: place.event) } : nil

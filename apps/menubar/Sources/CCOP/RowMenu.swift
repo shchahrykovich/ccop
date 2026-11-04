@@ -32,6 +32,32 @@ extension View {
     }
 }
 
+extension View {
+    /// A table row gets a tint while the mouse is over it, as wide as the row
+    /// and a little wider, so its first and last texts do not touch the edge.
+    func hoverRow(outset: CGFloat = 6, radius: CGFloat = 4) -> some View {
+        modifier(HoverRow(outset: outset, radius: radius))
+    }
+}
+
+private struct HoverRow: ViewModifier {
+    let outset: CGFloat
+    let radius: CGFloat
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if hovering {
+                    RoundedRectangle(cornerRadius: radius)
+                        .fill(Theme.text.opacity(0.05))
+                        .padding(.horizontal, -outset)
+                }
+            }
+            .onHover { hovering = $0 }
+    }
+}
+
 private struct ClickableRow: ViewModifier {
     let outset: CGFloat
     let radius: CGFloat

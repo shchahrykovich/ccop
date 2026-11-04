@@ -70,6 +70,13 @@ public struct Session: Codable, Equatable, Sendable, Identifiable {
     public var sizeBytes: UInt64
     public var continuedIn: String?
 
+    /// The new model calls and typed prompts since an older copy of this session.
+    public func changes(since old: Session) -> UInt64 {
+        let now = usage.requests + prompts
+        let then = old.usage.requests + old.prompts
+        return now > then ? now - then : 0
+    }
+
     /// When the session last did something.
     public var lastActivity: Date { updatedAt ?? modifiedAt }
 

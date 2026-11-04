@@ -68,6 +68,8 @@ struct ChatView: View {
     @State private var chat: Loadable<LaneChat> = .loading
     @State private var shownCall: CallRef?
     @State private var openTools: Set<Int> = []
+    /// The long prompts the user opened, by event index.
+    @State private var openPrompts: Set<Int> = []
     @State private var expandAll = false
     @State private var filter = ChatFilter()
     /// The event the user came to from another tab or the call sheet: it has a
@@ -88,7 +90,7 @@ struct ChatView: View {
                         Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).textSelection(.enabled)
                             .frame(maxWidth: .infinity).padding(40)
                     case let .loaded(c):
-                        messages(lane, texts: c.byEvent, shown: filter.indices(lane.events))
+                        messages(lane, texts: c.byEvent, shown: filter.indices(lane.events), proxy: proxy)
                         Color.clear.frame(height: 28)
                     }
                 } header: {
@@ -119,6 +121,7 @@ struct ChatView: View {
         .onChange(of: laneID) {
             chat = .loading
             openTools = []
+            openPrompts = []
         }
         .sheet(item: $shownCall) { ref in
             if let l = anatomy.lane(ref.lane), l.events.indices.contains(ref.index) {
@@ -134,6 +137,7 @@ struct ChatView: View {
         guard target.lane == lane.id, lane.events.indices.contains(target.event) else { return }
         filter = filter.showing(target.event, in: lane.events)
         if lane.events[target.event].kind == .tool { openTools.insert(target.event) }
+        if lane.events[target.event].kind == .prompt { openPrompts.insert(target.event) }
         jumpedTo = target.event
         jumps += 1
     }
@@ -219,7 +223,7 @@ struct ChatView: View {
     // MARK: - Messages
 
     @ViewBuilder
-    private func messages(_ lane: AnatomyLane, texts: [Int: ChatText], shown: [Int]) -> some View {
+    private func messages(_ lane: AnatomyLane, texts: [Int: ChatText], shown: [Int], proxy: ScrollViewProxy) -> some View {
         let prompts = promptNumbers(lane)
         if shown.isEmpty {
             Text("No messages match the filter.").font(.system(size: 13)).foregroundStyle(Board.text3)
@@ -232,7 +236,7 @@ struct ChatView: View {
             Group {
                 switch e.kind {
                 case .prompt:
-                    promptView(lane, e, texts[i], number: prompts[i] ?? 0, first: first)
+                    promptView(lane, i, e, texts[i], number: prompts[i] ?? 0, first: first, proxy: proxy)
                 case .answer:
                     // An answer after a prompt (or at the top) starts Claude's block with
                     // the avatar; the next answers of the same block show only their line.
@@ -276,7 +280,7 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func promptView(_ lane: AnatomyLane, _ e: AnatomyEvent, _ t: ChatText?, number: Int, first: Bool) -> some View {
+    private func promptView(_ lane: AnatomyLane, _ i: Int, _ e: AnatomyEvent, _ t: ChatText?, number: Int, first: Bool, proxy: ScrollViewProxy) -> some View {
         let main = lane.id == "main"
         let color = main ? Theme.prompt : Theme.agent
         let time = e.start.formatted(date: .omitted, time: .standard)
@@ -287,12 +291,9 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(main ? "Prompt \(number) · \(time)" : "Task from the lead · \(time)")
                     .font(.system(size: 11)).foregroundStyle(Board.text3).monospacedDigit()
-                Text(t?.text ?? e.text ?? "")
-                    .font(.system(size: 13))
-                    .lineSpacing(LineHeight.prompt)
-                    .padding(.vertical, LineHeight.prompt / 2)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                FoldedText(text: t?.text ?? e.text ?? "", color: color, isOpen: openPrompts.contains(i)) { wasTall in
+                    togglePrompt(i, wasTall: wasTall, proxy: proxy)
+                }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -304,6 +305,18 @@ struct ChatView: View {
                         .help("Tokens this prompt added to the context (estimated); every later call of this lane reads them again. The cost is its part of the model call after it.")
                 }
             }
+        }
+    }
+
+    /// Closing a tall text would leave the user far below its message, so the
+    /// page goes back to the message.
+    private func togglePrompt(_ i: Int, wasTall: Bool, proxy: ScrollViewProxy) {
+        if openPrompts.remove(i) == nil { openPrompts.insert(i) }
+        guard wasTall else { return }
+        Task { @MainActor in
+            // After the row has its new height.
+            try? await Task.sleep(for: .milliseconds(30))
+            proxy.scrollTo(i, anchor: .center)
         }
     }
 
@@ -858,5 +871,67 @@ struct LinkText: NSViewRepresentable {
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         return CGSize(width: width, height: ceil(layout.usedRect(for: container).height))
+    }
+}
+
+/// A message's text cut at `maxLines` lines as drawn, so a long line that wraps
+/// counts as several, with a Show more button under a text that is cut. Two
+/// hidden copies give the heights of the whole text and of the cut text.
+struct FoldedText: View {
+    static let maxLines = 5
+    /// Closing a text taller than this moves the page a lot.
+    static let tall: CGFloat = 300
+
+    let text: String
+    let color: Color
+    let isOpen: Bool
+    /// `wasTall`: the text was open and taller than `tall`.
+    let toggle: (_ wasTall: Bool) -> Void
+    @State private var wholeHeight: CGFloat = 0
+    @State private var cutHeight: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            styled(text)
+                .lineLimit(isOpen ? nil : Self.maxLines)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(alignment: .topLeading) {
+                    ZStack(alignment: .topLeading) {
+                        measure(lineLimit: nil) { wholeHeight = $0 }
+                        measure(lineLimit: Self.maxLines) { cutHeight = $0 }
+                    }
+                    .hidden()
+                    .accessibilityHidden(true)
+                }
+            if wholeHeight > cutHeight + 1 {
+                Button { toggle(isOpen && wholeHeight > Self.tall) } label: {
+                    HStack(spacing: 4) {
+                        Text(isOpen ? "Show less" : "Show more")
+                        Image(systemName: isOpen ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(color)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
+        }
+    }
+
+    private func styled(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 13))
+            .lineSpacing(LineHeight.prompt)
+            .padding(.vertical, LineHeight.prompt / 2)
+    }
+
+    private func measure(lineLimit: Int?, _ set: @escaping (CGFloat) -> Void) -> some View {
+        styled(text)
+            .lineLimit(lineLimit)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self, of: \.size.height, action: set)
     }
 }

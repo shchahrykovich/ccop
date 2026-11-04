@@ -496,6 +496,7 @@ struct CauseTable: View {
 struct PromptCosts: View {
     let anatomy: Anatomy
     @State private var showAll = false
+    @State private var sort = TableSort<Column>()
     private let shownAtFirst = 8
     /// Columns #, Time, Message, Calls, Cost (the message takes the rest).
     private let columns = TableRow(widths: [22, 46, 0, 44, 60], flexible: 2)
@@ -506,19 +507,31 @@ struct PromptCosts: View {
         return f
     }()
 
+    private enum Column { case number, time, message, calls, cost }
+
+    private static func ascending(_ column: Column, _ a: Turn, _ b: Turn) -> Bool {
+        switch column {
+        case .number: a.index < b.index
+        case .time: a.start < b.start
+        case .message: a.prompt.localizedStandardCompare(b.prompt) == .orderedAscending
+        case .calls: a.answers < b.answers
+        case .cost: a.totalCostMicros < b.totalCostMicros
+        }
+    }
+
     var body: some View {
-        let turns = anatomy.turns
+        let turns = sort.sorted(anatomy.turns, ascending: Self.ascending)
         let shown = showAll ? turns : Array(turns.prefix(shownAtFirst))
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: "Your messages", note: "the main session's calls until your next message")
                 .help("Cost: the main session's calls until your next message, and the subagents started in that time. Point at a row for the split.")
             VStack(spacing: 0) {
                 columns {
-                    ColumnTitle("#").cell(padding: 0)
-                    ColumnTitle("Time").cell()
-                    ColumnTitle("Message").cell()
-                    ColumnTitle("Calls").cell(.trailing)
-                    ColumnTitle("Cost").cell(.trailing)
+                    SortTitle(title: "#", column: Column.number, sort: $sort, alignment: .leading).cell(padding: 0)
+                    SortTitle(title: "Time", column: Column.time, sort: $sort, alignment: .leading).cell()
+                    SortTitle(title: "Message", column: Column.message, sort: $sort, alignment: .leading).cell()
+                    SortTitle(title: "Calls", column: Column.calls, sort: $sort).cell(.trailing)
+                    SortTitle(title: "Cost", column: Column.cost, sort: $sort).cell(.trailing)
                 }
                 .padding(.vertical, 4)
                 ForEach(shown) { t in
@@ -569,10 +582,24 @@ struct CommandTable: View {
     @State private var showAll = false
     @State private var open: Set<String> = []
     @State private var shownCall: CallRef?
+    @State private var sort = TableSort<Column>()
+
+    private enum Column { case program, calls, added, errors, cost }
+
+    private func ascending(_ column: Column, _ a: CCOPKit.CommandGroup, _ b: CCOPKit.CommandGroup) -> Bool {
+        switch column {
+        case .program: a.group.localizedStandardCompare(b.group) == .orderedAscending
+        case .calls: a.calls < b.calls
+        case .added: (added(a) ?? 0) < (added(b) ?? 0)
+        case .errors: a.errors < b.errors
+        case .cost: a.costMicros < b.costMicros
+        }
+    }
 
     var body: some View {
         let spend = anatomy.spend
-        let shown = showAll ? spend.commands : Array(spend.commands.prefix(12))
+        let commands = sort.sorted(spend.commands, ascending: ascending)
+        let shown = showAll ? commands : Array(commands.prefix(12))
         let rows = shown.map { g in
             (g: g, cells: [g.group, "\(g.calls)", added(g).map { Format.tokens($0) } ?? "", "\(g.errors)", Format.dollars(g.costMicros)])
         }
@@ -582,11 +609,12 @@ struct CommandTable: View {
                 .help("Bash calls by the program they ran (after `cd <folder> &&`). Cost: the model calls after their results. Context added: tokens the output put into the context (estimated). Click a call to see its whole input and output.")
             VStack(spacing: 0) {
                 AutoColumns(maxContent: columns) {
-                    ColumnTitle("Program").padding(.leading, Self.chevronWidth).cell(padding: 0)
-                    ColumnTitle("Calls").cell(.trailing)
-                    ColumnTitle("Context added").cell(.trailing)
-                    ColumnTitle("Errors").cell(.trailing)
-                    ColumnTitle("Cost").cell(.trailing)
+                    SortTitle(title: "Program", column: Column.program, sort: $sort, alignment: .leading)
+                        .padding(.leading, Self.chevronWidth).cell(padding: 0)
+                    SortTitle(title: "Calls", column: Column.calls, sort: $sort).cell(.trailing)
+                    SortTitle(title: "Context added", column: Column.added, sort: $sort).cell(.trailing)
+                    SortTitle(title: "Errors", column: Column.errors, sort: $sort).cell(.trailing)
+                    SortTitle(title: "Cost", column: Column.cost, sort: $sort).cell(.trailing)
                 }
                 .padding(.vertical, 4)
                 ForEach(rows, id: \.g.id) { row in
@@ -662,7 +690,7 @@ struct CommandTable: View {
         return titles.indices.map { i in
             let font = i == 0 ? mono : (i == 4 ? digitsBold : digits)
             let widest = rows.map { SpendStyle.width($0[i], font) }.max() ?? 0
-            return max(widest, SpendStyle.width(titles[i], header)) + (i == 0 ? chevronWidth : 2)
+            return max(widest, SpendStyle.width(titles[i], header) + SortTitle<Column>.arrowRoom) + (i == 0 ? chevronWidth : 2)
         }
     }
 

@@ -15,6 +15,19 @@ public enum Format {
     }
 
     /// `96%`.
+    /// A count in at most 4 characters: its first digit, rounded down, with
+    /// `+` when it was rounded. 80, 87 → 80+, 1500 → 1K+, 2.4 million → 2M+.
+    public static func changes(_ n: UInt64) -> String {
+        let (unit, suffix): (UInt64, String) = n >= 1_000_000 ? (1_000_000, "M") : n >= 1000 ? (1000, "K") : (1, "")
+        let value = n / unit
+        // "100K+" would be 5 characters.
+        if unit > 1, value >= 100 { return "99\(suffix)+" }
+        var scale: UInt64 = 1
+        while value / scale >= 10 { scale *= 10 }
+        let shown = value / scale * scale
+        return "\(shown)\(suffix)\(shown * unit == n ? "" : "+")"
+    }
+
     public static func percent(_ ratio: Double) -> String {
         "\(Int((ratio * 100).rounded()))%"
     }

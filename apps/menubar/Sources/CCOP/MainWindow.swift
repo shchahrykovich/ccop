@@ -60,9 +60,9 @@ struct WindowRootView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView(selectedID: model.windowSelected?.id) { model.windowSelectedID = $0 }
+            SidebarView(selectedID: model.windowSelected?.id) { model.chooseInWindow($0) }
             Group {
-                if let s = model.windowSelected {
+                if let s = model.windowShown {
                     WindowDetail(session: s)
                 } else {
                     Text("Choose a session").foregroundStyle(Theme.text3).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -78,27 +78,31 @@ struct WindowRootView: View {
     }
 }
 
-/// One session in the window: a header with the tabs, then the tab.
+/// One session in the window: a header with the tabs, then the tab. The tab
+/// shows `session`, as it was when the user came to the tab; the header has
+/// the newest name and state.
 struct WindowDetail: View {
     @Environment(AppModel.self) private var model
     let session: Session
 
     var body: some View {
         @Bindable var model = model
+        let latest = model.windowSelected ?? session
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 WindowHistoryButtons()
-                if session.active {
+                if latest.active {
                     ActiveDot(size: 8).help("Active")
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(session.title).font(.ui(15, .semibold)).lineLimit(1)
-                    Text([session.projectName, session.gitBranch].compactMap { $0 }.joined(separator: " · "))
+                    Text(latest.title).font(.ui(15, .semibold)).lineLimit(1)
+                    Text([latest.projectName, latest.gitBranch].compactMap { $0 }.joined(separator: " · "))
                         .font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
                 }
-                .help(session.title)
-                FlagButton(session: session)
+                .help(latest.title)
+                FlagButton(session: latest)
                 Spacer(minLength: 12)
+                WindowUpdateButton()
                 Segmented(options: DetailTab.allCases.map { ($0, $0.title) }, selection: $model.windowTab,
                           height: 24, equalWidths: false, radius: 8)
                     .fixedSize()
@@ -115,6 +119,48 @@ struct WindowDetail: View {
             case .spend, .cause, .chat, .anatomy, .context:
                 AnatomyLoader(session: session, tab: model.windowTab)
             }
+        }
+    }
+}
+
+/// Says that the session has new data the tab does not show yet; a click shows it.
+private struct WindowUpdateButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if model.windowUpdating, case .loaded = model.windowAnatomy {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 28, height: 28)
+                .help("Reading the new data…")
+        } else if model.windowHasUpdates {
+            let count = model.windowUpdateCount
+            let help = Self.help(count)
+            Button { model.showLatestInWindow() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
+                    if count > 0 {
+                        Text(Format.changes(count)).font(.ui(12, .semibold)).monospacedDigit()
+                    }
+                }
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 28, minHeight: 24)
+                .background(Theme.accent.opacity(0.12), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help(help)
+            .accessibilityLabel(help)
+        }
+    }
+
+    private static func help(_ count: UInt64) -> String {
+        switch count {
+        case 0: "Updates available."
+        case 1: "Updates available: 1 new model call or prompt."
+        default: "Updates available: \(count.formatted()) new model calls and prompts."
         }
     }
 }
@@ -138,7 +184,7 @@ private struct WindowHistoryButtons: View {
     }
 }
 
-/// Loads the anatomy when shown, and shows Anatomy or Context when it is there.
+/// Shows Spend, Cause, Chat, Anatomy or Context when the tab's anatomy is there.
 struct AnatomyLoader: View {
     @Environment(AppModel.self) private var model
     let session: Session
@@ -146,7 +192,7 @@ struct AnatomyLoader: View {
 
     var body: some View {
         Group {
-            switch model.anatomies[session.id] {
+            switch model.windowAnatomy {
             case let .loaded(a, _):
                 switch tab {
                 case .spend: SpendView(session: session, anatomy: a)
@@ -161,13 +207,12 @@ struct AnatomyLoader: View {
             case let .failed(why):
                 VStack(spacing: 8) {
                     Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn).textSelection(.enabled)
-                    Button("Try again") { model.loadAnatomy(session, reload: true) }
+                    Button("Try again") { model.showLatestInWindow() }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loading, nil:
                 ProgressView("Reading the session…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
     }
 }

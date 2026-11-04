@@ -15,5 +15,6 @@ let package = Package(
         .target(name: "CCOPKit"),
         .executableTarget(name: "CCOP", dependencies: ["CCOPKit"]),
         .testTarget(name: "CCOPKitTests", dependencies: ["CCOPKit"]),
+        .testTarget(name: "CCOPTests", dependencies: ["CCOP", "CCOPKit"]),
     ]
 )
