@@ -87,6 +87,7 @@ struct WindowDetail: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             HStack(spacing: 12) {
+                WindowHistoryButtons()
                 if session.active {
                     ActiveDot(size: 8).help("Active")
                 }
@@ -117,6 +118,25 @@ struct WindowDetail: View {
     }
 }
 
+/// Back and Forward: the places the window showed before and after this one.
+private struct WindowHistoryButtons: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 0) {
+            button("chevron.left", "Back", key: "[", enabled: model.windowHistory.canGoBack) { model.goBackInWindow() }
+            button("chevron.right", "Forward", key: "]", enabled: model.windowHistory.canGoForward) { model.goForwardInWindow() }
+        }
+    }
+
+    private func button(_ symbol: String, _ name: String, key: KeyEquivalent, enabled: Bool, action: @escaping () -> Void) -> some View {
+        HeaderIconButton(symbol: symbol, help: name, iconSize: 13, action: action)
+            .keyboardShortcut(key, modifiers: .command)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.35)
+    }
+}
+
 /// Loads the anatomy when shown, and shows Anatomy or Context when it is there.
 struct AnatomyLoader: View {
     @Environment(AppModel.self) private var model
@@ -130,7 +150,9 @@ struct AnatomyLoader: View {
                 switch tab {
                 case .spend: SpendView(session: session, anatomy: a)
                 case .cause: CauseView(anatomy: a)
-                case .chat: ChatView(session: session, anatomy: a)
+                // A new session starts with its own messages, so a place from
+                // the history is not looked for in the old session's messages.
+                case .chat: ChatView(session: session, anatomy: a).id(session.id)
                 case .anatomy: AnatomyView(session: session, anatomy: a)
                 // A new session starts with nothing chosen on the charts.
                 default: ContextView(anatomy: a).id(session.id)

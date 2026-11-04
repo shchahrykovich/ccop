@@ -38,7 +38,8 @@ struct CauseView: View {
     }
 
     private func chip(_ c: Cause, on: Bool) -> some View {
-        Button { model.causeID = c.id } label: {
+        // The chip that is on adds no step to Back and Forward.
+        Button { if !on { model.causeID = c.id } } label: {
             HStack(spacing: 6) {
                 Text(c.title)
                 Text(Format.dollars(c.costMicros)).monospacedDigit().opacity(0.7)

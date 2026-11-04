@@ -36,21 +36,40 @@ final class AppModel {
             if windowSelectedID != oldValue {
                 chatLane = "main"
                 chatTarget = nil
+                chatEvent = nil
                 causeID = nil
             }
+            noteWindowPlace()
         }
     }
     /// The lane the Chat tab shows: "main" or a subagent's id. Anatomy sets it
     /// to open one agent's chat.
-    var chatLane = "main"
+    var chatLane = "main" {
+        didSet {
+            if chatLane != oldValue { chatEvent = nil }
+            noteWindowPlace()
+        }
+    }
     /// The place the Chat tab goes to next; it takes it and sets this to nil.
     var chatTarget: ChatPlace?
+    /// The event the Chat tab was last sent to, for Back and Forward; nil: none.
+    @ObservationIgnored private var chatEvent: Int?
     /// The cause the Cause tab shows (`Cause.id`); nil: the biggest.
-    var causeID: String?
+    var causeID: String? {
+        didSet { noteWindowPlace() }
+    }
     /// No automatic updates (sessions, times, limits) while the user looks at
     /// the data; Refresh still reads once. Not saved: a new launch updates.
     var paused = false
-    var windowTab: DetailTab = .overview
+    var windowTab: DetailTab = .overview {
+        didSet {
+            if windowTab != .chat { chatEvent = nil }
+            noteWindowPlace()
+        }
+    }
+    /// The places the main window showed, for Back and Forward.
+    private(set) var windowHistory = WindowHistory()
+    @ObservationIgnored private var windowPlaceNoted = false
     /// Day sections the user closed ("Today", "Yesterday", "Friday 30 October").
     var collapsedDays: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "collapsedDays") ?? []) {
         didSet { UserDefaults.standard.set(Array(collapsedDays).sorted(), forKey: "collapsedDays") }
@@ -255,8 +274,43 @@ final class AppModel {
     /// Shows one event in the Chat tab.
     func openInChat(_ place: ChatPlace) {
         chatLane = place.lane
+        chatEvent = place.event
         chatTarget = place
         windowTab = .chat
+    }
+
+    /// One click can set several values (session, tab, lane). This records them
+    /// as one step, after the click's code has ended.
+    private func noteWindowPlace() {
+        guard !windowPlaceNoted else { return }
+        windowPlaceNoted = true
+        Task { @MainActor in
+            windowPlaceNoted = false
+            // No session is not a place to go back to.
+            guard let windowSelectedID else { return }
+            windowHistory.visit(WindowPlace(session: windowSelectedID, tab: windowTab, chatLane: chatLane,
+                                            chatEvent: chatEvent, causeID: causeID))
+        }
+    }
+
+    func goBackInWindow() {
+        if let place = windowHistory.goBack() { show(place) }
+    }
+
+    func goForwardInWindow() {
+        if let place = windowHistory.goForward() { show(place) }
+    }
+
+    /// Shows a place from the history. The history already has it as current,
+    /// so `noteWindowPlace` adds no step.
+    private func show(_ place: WindowPlace) {
+        // The session first: a new session resets the lane, the event and the cause.
+        windowSelectedID = place.session
+        if let lane = place.chatLane { chatLane = lane }
+        if let cause = place.causeID { causeID = cause } else if place.tab == .cause { causeID = nil }
+        chatEvent = place.chatEvent
+        chatTarget = place.chatLane.flatMap { lane in place.chatEvent.map { ChatPlace(lane: lane, event: $0) } }
+        windowTab = place.tab
     }
 
     /// One event for the JSON of a table row: a tool call with its whole input
@@ -386,21 +440,6 @@ final class AppModel {
             NSWorkspace.shared.open(url)
         } else {
             error = "The folder \(s.projectDir) does not exist any more."
-        }
-    }
-}
-
-enum DetailTab: String, CaseIterable, Identifiable {
-    case overview, spend, cause, chat, anatomy, context
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .overview: "Overview"
-        case .spend: "Spend"
-        case .cause: "Cause"
-        case .chat: "Chat"
-        case .anatomy: "Anatomy"
-        case .context: "Context"
         }
     }
 }
