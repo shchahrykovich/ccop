@@ -155,6 +155,8 @@ public struct AnatomyEvent: Codable, Equatable, Sendable {
     /// Compact: the size Claude Code gives for the context after it. The next
     /// call reads more: this does not count the system prompt and the tools.
     public var afterTokens: UInt64?
+    /// Read: the lines it got, when that was not the whole file.
+    public var lines: FileLines?
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
 
@@ -169,6 +171,22 @@ public struct AnatomyEvent: Codable, Equatable, Sendable {
         case .report: "Subagent report"
         }
     }
+}
+
+/// Lines `start` to `end` (from 1, both in) of a file of `total` lines.
+public struct FileLines: Codable, Equatable, Sendable {
+    public var start: UInt64
+    public var end: UInt64
+    public var total: UInt64
+
+    public init(start: UInt64, end: UInt64, total: UInt64) {
+        self.start = start
+        self.end = end
+        self.total = total
+    }
+
+    /// `lines 290–376 of 376`, as Rust's `Display` for `Lines`.
+    public var text: String { "lines \(start)–\(end) of \(total)" }
 }
 
 public struct ContextPoint: Codable, Equatable, Sendable {

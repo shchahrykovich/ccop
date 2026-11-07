@@ -189,6 +189,35 @@ pub struct Event {
     /// Compact: the size Claude Code gives for the context after it. The next
     /// call reads more: this does not count the system prompt and the tools.
     pub after_tokens: Option<u64>,
+    /// Read: the lines it got, when that was not the whole file (Claude Code
+    /// cuts a long file, and `offset` / `limit` choose a part).
+    pub lines: Option<Lines>,
+}
+
+/// Lines `start` to `end` (from 1, both in) of a file of `total` lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lines {
+    pub start: u64,
+    pub end: u64,
+    pub total: u64,
+}
+
+impl Lines {
+    /// From a Read result's `toolUseResult.file` (`startLine`, `numLines`,
+    /// `totalLines`; checked 2026-11-07). None for the whole file.
+    fn of_read(result: &Value) -> Option<Lines> {
+        let file = result.get("file")?;
+        let n = |k: &str| file.get(k).and_then(Value::as_u64);
+        let (start, count, total) = (n("startLine")?, n("numLines")?, n("totalLines")?);
+        let lines = Lines { start: start.max(1), end: start.max(1) + count.max(1) - 1, total };
+        (count > 0 && (lines.start > 1 || lines.end < total)).then_some(lines)
+    }
+}
+
+impl std::fmt::Display for Lines {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "lines {}–{} of {}", self.start, self.end, self.total)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -442,6 +471,7 @@ impl LaneReader {
             paid_tokens: None,
             trigger: None,
             after_tokens: None,
+            lines: None,
         });
         self.lane.events.len() - 1
     }
@@ -559,6 +589,9 @@ impl LaneReader {
                 e.result_bytes = Some(result_bytes(res.get("content").unwrap_or(&Value::Null)));
                 if let Some(a) = agent_id {
                     e.agent_id = Some(a.to_string());
+                }
+                if e.tool.as_deref() == Some("Read") {
+                    e.lines = r.get("toolUseResult").and_then(Lines::of_read);
                 }
                 if error {
                     self.lane.errors += 1;

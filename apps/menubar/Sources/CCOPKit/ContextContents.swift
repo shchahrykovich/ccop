@@ -41,7 +41,13 @@ public enum ContextContents {
                 let from = e.agentId ?? "another agent"
                 let name = names[from] ?? "from \(from)"
                 label = each ? e.text.map { oneLine("\(name): \($0)") } ?? name : name
-            case let e?: label = e.text.map { text in oneLine(dir.map { inFolder(text, $0) } ?? text) } ?? item.part
+            case let e?:
+                label = e.text.map { text in
+                    let shown = oneLine(dir.map { inFolder(text, $0) } ?? text)
+                    // Each addition: a part of a file says which part, so two reads of one file differ.
+                    guard each, let lines = e.lines else { return shown }
+                    return "\(shown) · \(lines.text)"
+                } ?? item.part
             case nil: label = item.part
             }
             let key = "\(item.part)\u{1}\(label)"

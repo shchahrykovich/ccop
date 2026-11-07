@@ -48,6 +48,19 @@ final class ContextContentsTests: XCTestCase {
         XCTAssertEqual(rows.reduce(0) { $0 + $1.tokens }, 24_150)
     }
 
+    /// Claude Code cut the first read; the second read the rest with `offset`.
+    /// Each addition names the lines, so the rows do not look like one read
+    /// twice; grouped, they stay one row of the file.
+    func testEachAdditionNamesTheLinesOfAPartialRead() {
+        var l = lane
+        l.events[2].lines = FileLines(start: 1, end: 289, total: 376)
+        l.events[4].lines = FileLines(start: 290, end: 376, total: 376)
+        let rows = ContextContents.rows(l, call: 2, each: true, dir: "/p")
+        XCTAssertEqual(rows.filter { $0.part == "Tool: Read" }.map(\.label),
+                       ["docs/big.md · lines 1–289 of 376", "docs/big.md · lines 290–376 of 376"])
+        XCTAssertEqual(ContextContents.rows(l, call: 2, each: false, dir: "/p").map(\.label), ["Start", "docs/big.md", "Claude output"])
+    }
+
     func testAnEarlierCallHoldsOnlyWhatCameBeforeIt() {
         XCTAssertEqual(ContextContents.rows(lane, call: 0, each: false, dir: nil).map(\.label), ["Start"])
         XCTAssertEqual(ContextContents.rows(lane, call: 1, each: false, dir: "/p").map(\.label), ["Start", "docs/big.md", "Claude output"])

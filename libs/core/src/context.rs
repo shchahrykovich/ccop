@@ -211,7 +211,14 @@ pub fn contents(lane: &Lane, call: usize, each: bool, dir: Option<&str>, lanes: 
             Some(e) => e
                 .text
                 .as_deref()
-                .map(|t| crate::anatomy::clip(dir.map_or(t, |d| in_folder(t, d)), crate::anatomy::SUMMARY_CHARS))
+                .map(|t| {
+                    let t = crate::anatomy::clip(dir.map_or(t, |d| in_folder(t, d)), crate::anatomy::SUMMARY_CHARS);
+                    // Each addition: a part of a file says which part, so two reads of one file differ.
+                    match e.lines.filter(|_| each) {
+                        Some(l) => format!("{t} · {l}"),
+                        None => t,
+                    }
+                })
                 .unwrap_or_else(|| it.part.clone()),
             None => it.part.clone(),
         };
@@ -423,6 +430,41 @@ mod tests {
         assert_eq!(each.rows.len(), 5);
         assert_eq!(each.rows.iter().map(|r| r.tokens).sum::<u64>(), 24_150);
         assert!(contents(&lane, 3, false, None, &[]).is_none());
+    }
+
+    /// Claude Code cuts a long file's Read, and the agent reads the rest with
+    /// `offset`. In "each" the two rows say which lines they hold, so they do
+    /// not look like the same read twice. A whole file gets no range.
+    #[test]
+    fn each_addition_names_the_lines_of_a_partial_read() {
+        let read = |t: &str, id: &str, start: u64, lines: u64, total: u64| {
+            json!({"type": "user", "timestamp": format!("2026-11-02T10:00:{t}Z"),
+                   "message": {"content": [{"type": "tool_result", "tool_use_id": id, "content": "x".repeat(1000)}]},
+                   "toolUseResult": {"type": "text", "file": {"filePath": "/p/big.md", "startLine": start, "numLines": lines, "totalLines": total}}})
+            .to_string()
+        };
+        let mut r = LaneReader::main();
+        for line in [
+            json!({"type": "user", "timestamp": "2026-11-02T10:00:00Z", "message": {"content": "read it"}}).to_string(),
+            answer("01", "a1", 20_000, 100, json!([{"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/p/big.md"}}])),
+            read("02", "r1", 1, 289, 376),
+            answer("03", "a2", 23_100, 50, json!([{"type": "tool_use", "id": "r2", "name": "Read", "input": {"file_path": "/p/big.md", "offset": 290, "limit": 90}}])),
+            read("04", "r2", 290, 87, 376),
+            answer("05", "a3", 24_150, 50, json!([{"type": "tool_use", "id": "r3", "name": "Read", "input": {"file_path": "/p/small.md"}}])),
+            read("06", "r3", 1, 40, 40),
+            answer("07", "a4", 25_200, 10, json!([])),
+        ] {
+            r.feed(&line);
+        }
+        let lane = r.finish();
+        let each = contents(&lane, 3, true, Some("/p"), &[]).unwrap();
+        let mut reads: Vec<&str> = each.rows.iter().filter(|r| r.part == tool_part("Read")).map(|r| r.label.as_str()).collect();
+        reads.sort();
+        assert_eq!(reads, ["big.md · lines 1–289 of 376", "big.md · lines 290–376 of 376", "small.md"]);
+        // Grouped: one row per file, as before.
+        let grouped = contents(&lane, 3, false, Some("/p"), &[]).unwrap();
+        let big: Vec<(&str, usize)> = grouped.rows.iter().filter(|r| r.part == tool_part("Read")).map(|r| (r.label.as_str(), r.events.len())).collect();
+        assert_eq!(big, [("big.md", 2), ("small.md", 1)]);
     }
 
     #[test]

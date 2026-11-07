@@ -44,7 +44,8 @@
           "cost_micros": 102412,
           "paid_tokens": 20123,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -74,7 +75,8 @@
           "cost_micros": 102412,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "tool",
@@ -97,7 +99,8 @@
           "cost_micros": 6653,
           "paid_tokens": 10872,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "tool",
@@ -120,7 +123,8 @@
           "cost_micros": 6653,
           "paid_tokens": 10872,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -150,7 +154,8 @@
           "cost_micros": 13305,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "compact",
@@ -180,7 +185,8 @@
           "cost_micros": 8552,
           "paid_tokens": 11266,
           "trigger": "auto",
-          "after_tokens": 2000
+          "after_tokens": 2000,
+          "lines": null
         },
         {
           "kind": "prompt",
@@ -203,7 +209,8 @@
           "cost_micros": 8552,
           "paid_tokens": 11266,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -233,7 +240,8 @@
           "cost_micros": 17104,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "tool",
@@ -256,7 +264,8 @@
           "cost_micros": 2852,
           "paid_tokens": 11356,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "report",
@@ -279,7 +288,8 @@
           "cost_micros": 2852,
           "paid_tokens": 11356,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -309,7 +319,8 @@
           "cost_micros": 5704,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         }
       ],
       "context": [
@@ -497,7 +508,8 @@
           "cost_micros": 23004,
           "paid_tokens": 9052,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -527,7 +539,8 @@
           "cost_micros": 23004,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "tool",
@@ -550,7 +563,8 @@
           "cost_micros": 2802,
           "paid_tokens": 9328,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         },
         {
           "kind": "answer",
@@ -580,7 +594,8 @@
           "cost_micros": 2802,
           "paid_tokens": null,
           "trigger": null,
-          "after_tokens": null
+          "after_tokens": null,
+          "lines": null
         }
       ],
       "context": [
