@@ -592,6 +592,8 @@
         "error_cost_micros": 0,
         "avg_context": 20836,
         "added_tokens": 0,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "main",
@@ -616,6 +618,8 @@
         "error_cost_micros": 0,
         "avg_context": 9002,
         "added_tokens": 0,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "a1",
@@ -635,6 +639,8 @@
         "error_cost_micros": 0,
         "avg_context": 22501,
         "added_tokens": 0,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "main",
@@ -654,6 +660,8 @@
         "error_cost_micros": 0,
         "avg_context": 21704,
         "added_tokens": 3,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "main",
@@ -673,6 +681,8 @@
         "error_cost_micros": 0,
         "avg_context": 21704,
         "added_tokens": 1578,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "main",
@@ -692,6 +702,8 @@
         "error_cost_micros": 0,
         "avg_context": 9303,
         "added_tokens": 251,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "a1",
@@ -711,6 +723,8 @@
         "error_cost_micros": 0,
         "avg_context": 0,
         "added_tokens": 0,
+        "description": null,
+        "server_description": null,
         "items": [
           {
             "lane": "main",

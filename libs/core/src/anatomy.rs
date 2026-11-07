@@ -83,6 +83,14 @@ pub struct Lane {
     pub events: Vec<Event>,
     /// The context at each model call, split into parts (see `context.rs`).
     pub context: Vec<ContextPoint>,
+    /// What the `api-request-shape` records of this file say about each tool.
+    /// `build` puts it on the causes; it is not part of the JSON.
+    #[serde(skip)]
+    pub tool_descriptions: BTreeMap<String, String>,
+    /// What the `mcp_instructions_delta` records of this file say about each
+    /// MCP server, by the server's name in a tool's name. Not in the JSON.
+    #[serde(skip)]
+    pub server_descriptions: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -279,6 +287,8 @@ impl LaneReader {
                 name,
                 agent_type,
                 model: None,
+                tool_descriptions: BTreeMap::new(),
+                server_descriptions: BTreeMap::new(),
                 started_at: None,
                 ended_at: None,
                 usage: Usage::default(),
@@ -316,7 +326,38 @@ impl LaneReader {
             Some("assistant") => self.answer(&r, at),
             Some("user") => self.user(&r, at),
             Some("system") => self.system(&r, at),
+            Some("api-request-shape") => self.tool_descriptions(&r),
+            Some("attachment") => self.server_descriptions(&r),
             _ => {}
+        }
+    }
+
+    /// An `api-request-shape` record holds the tools of a request, with the
+    /// texts the model reads. A later record wins.
+    fn tool_descriptions(&mut self, r: &Value) {
+        let Some(tools) = r["shape"].get("tools").and_then(Value::as_array) else { return };
+        for t in tools {
+            if let (Some(name), Some(text)) = (t.get("name").and_then(Value::as_str), t.get("description").and_then(Value::as_str)) {
+                self.lane.tool_descriptions.insert(name.to_string(), short_description(text));
+            }
+        }
+    }
+
+    /// `mcp_instructions_delta` lists the servers that were added, with their
+    /// instructions, in the same order. A later record wins.
+    fn server_descriptions(&mut self, r: &Value) {
+        let a = &r["attachment"];
+        if a.get("type").and_then(Value::as_str) != Some("mcp_instructions_delta") {
+            return;
+        }
+        let (Some(names), Some(blocks)) = (a.get("addedNames").and_then(Value::as_array), a.get("addedBlocks").and_then(Value::as_array)) else { return };
+        for (name, block) in names.iter().zip(blocks) {
+            if let (Some(name), Some(block)) = (name.as_str(), block.as_str()) {
+                match server_description(block) {
+                    Some(text) => self.lane.server_descriptions.insert(server_key(name), text),
+                    None => self.lane.server_descriptions.remove(&server_key(name)),
+                };
+            }
         }
     }
 
@@ -583,6 +624,40 @@ impl LaneReader {
     }
 }
 
+/// `claude.ai Kola` is `claude_ai_Kola` in a tool's name, and
+/// `plugin:kola:kola` is `plugin_kola_kola`.
+fn server_key(name: &str) -> String {
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+}
+
+/// `mcp__wiki__get_page` → `wiki`.
+fn server_of_tool(tool: &str) -> Option<&str> {
+    tool.strip_prefix("mcp__")?.split_once("__").map(|(server, _)| server).filter(|s| !s.is_empty())
+}
+
+/// The first sentence of a server's instructions, if it can tell a person what
+/// the server is. The text is written for the model: `## name`, maybe a title,
+/// then often what the server is. A warning or a list of words says nothing.
+fn server_description(block: &str) -> Option<String> {
+    let text = block.lines().skip_while(|l| l.trim().is_empty() || l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+    let paragraph = text.split("\n\n").next()?.trim();
+    let line = paragraph.split_whitespace().collect::<Vec<_>>().join(" ");
+    let sentence = line.find(". ").map_or(line.as_str(), |end| &line[..=end]);
+    if !sentence.contains(' ') || sentence.trim_start_matches('*').starts_with("IMPORTANT") {
+        return None;
+    }
+    Some(clip(sentence, DESCRIPTION_CHARS))
+}
+
+/// The longest tool description kept for the app.
+const DESCRIPTION_CHARS: usize = 300;
+
+/// The first paragraph of a tool's description, on one line. The rest of the
+/// text is instructions for the model, and can be many KB.
+fn short_description(text: &str) -> String {
+    clip(text.trim().split("\n\n").next().unwrap_or_default(), DESCRIPTION_CHARS)
+}
+
 /// `id` is the lane itself or one of the lanes above it. A lane with this
 /// parent would be its own ancestor, and the tree has no such loop.
 fn descends_from(lanes: &[Lane], lane: usize, id: &str) -> bool {
@@ -653,7 +728,7 @@ pub fn build(session_id: &str, main: Lane, mut subagents: Vec<Lane>) -> Anatomy 
         .collect();
     contributors.sort_by(|a, b| b.tokens.cmp(&a.tokens).then(a.lane.cmp(&b.lane)).then(a.event.cmp(&b.event)));
     contributors.truncate(CONTRIBUTORS);
-    let (spend, paid) = crate::spend::analyze_with_paid(&lanes);
+    let (mut spend, paid) = crate::spend::analyze_with_paid(&lanes);
     for (li, lane) in lanes.iter_mut().enumerate() {
         for (ei, e) in lane.events.iter_mut().enumerate() {
             let p = paid.get(&(li, ei));
@@ -666,6 +741,10 @@ pub fn build(session_id: &str, main: Lane, mut subagents: Vec<Lane>) -> Anatomy 
                 _ => p.map(|p| p.tokens.round() as u64),
             };
         }
+    }
+    for c in spend.causes.iter_mut().filter(|c| c.kind == crate::spend::CauseKind::Tool) {
+        c.description = lanes.iter().find_map(|l| l.tool_descriptions.get(&c.name)).cloned();
+        c.server_description = server_of_tool(&c.name).and_then(|s| lanes.iter().find_map(|l| l.server_descriptions.get(s))).cloned();
     }
     Anatomy {
         session_id: session_id.to_string(),
@@ -943,6 +1022,99 @@ mod tests {
     fn result(t: &str, use_id: &str, text: &str, error: bool, extra: Value) -> Value {
         json!({"type": "user", "timestamp": format!("2026-11-02T10:{t}Z"), "toolUseResult": extra,
                "message": {"content": [{"type": "tool_result", "tool_use_id": use_id, "content": text, "is_error": error}]}})
+    }
+
+    fn shape(t: &str, tools: Value) -> Value {
+        json!({"type": "api-request-shape", "timestamp": format!("2026-11-02T10:{t}Z"), "shape": {"system": [], "tools": tools}})
+    }
+
+    #[test]
+    fn a_tool_cause_gets_the_first_paragraph_of_its_description_from_any_lane() {
+        let main = lane(
+            LaneReader::main(),
+            &[
+                shape("00:00", json!([{"name": "mcp__notes__get_page", "description": "Old text."}, {"name": "Unused", "description": "Never called."}])),
+                shape("00:01", json!([{"name": "mcp__notes__get_page", "description": "Read a page\nby slug.\n\nCall this first."}])),
+                prompt("00:02", "go"),
+                answer("00:03", "m1", 10, json!([{"type": "tool_use", "id": "t1", "name": "mcp__notes__get_page", "input": {}}, {"type": "tool_use", "id": "t2", "name": "Agent", "input": {"description": "Dig"}}, {"type": "tool_use", "id": "t3", "name": "mcp__notes__put_page", "input": {}}])),
+                result("00:04", "t1", "text", false, json!({})),
+                result("00:04", "t2", "text", false, json!({})),
+                result("00:04", "t3", "text", false, json!({})),
+                answer("00:05", "m2", 10, json!([{"type": "text", "text": "Done."}])),
+            ],
+        );
+        let sub = lane(
+            LaneReader::subagent("a1", LaneMeta { tool_use_id: Some("t2".into()), ..Default::default() }),
+            &[shape("00:03", json!([{"name": "mcp__notes__search", "description": "Find pages."}])),
+              prompt("00:03", "dig"),
+              answer("00:04", "s1", 10, json!([{"type": "tool_use", "id": "u1", "name": "mcp__notes__search", "input": {}}])),
+              result("00:05", "u1", "text", false, json!({})),
+              answer("00:06", "s2", 10, json!([{"type": "text", "text": "Found."}]))],
+        );
+        let a = build("s", main, vec![sub]);
+        let description = |name: &str| a.spend.causes.iter().find(|c| c.name == name).unwrap().description.clone();
+        assert_eq!(description("mcp__notes__get_page").as_deref(), Some("Read a page by slug."));
+        assert_eq!(description("mcp__notes__search").as_deref(), Some("Find pages."), "a subagent's record counts");
+        assert_eq!(description("mcp__notes__put_page"), None, "no record has this tool");
+        assert!(a.spend.causes.iter().all(|c| c.name != "Unused"));
+        assert!(!serde_json::to_string(&a.lanes[0]).unwrap().contains("tool_descriptions"), "the lanes do not repeat them in the JSON");
+    }
+
+    fn instructions(t: &str, names: &[&str], blocks: &[&str]) -> Value {
+        json!({"type": "attachment", "timestamp": format!("2026-11-02T10:{t}Z"),
+               "attachment": {"type": "mcp_instructions_delta", "addedNames": names, "addedBlocks": blocks, "removedNames": []}})
+    }
+
+    #[test]
+    fn a_tool_cause_gets_the_description_of_its_mcp_server() {
+        let main = lane(
+            LaneReader::main(),
+            &[
+                instructions("00:00", &["notes", "claude.ai Note Box", "plugin:maker:box"], &[
+                    "## notes\nOld text about notes.",
+                    "## claude.ai Note Box\nNote Box keeps notes. Call get_note first.\n\nMore.",
+                    "## plugin:maker:box\n# Box\n\nBox makes boxes.",
+                ]),
+                instructions("00:01", &["notes"], &["## notes\nThis is a private\nnote store.\n\n1. Call get_page."]),
+                prompt("00:02", "go"),
+                answer("00:03", "m1", 10, json!([
+                    {"type": "tool_use", "id": "t1", "name": "mcp__notes__get_page", "input": {}},
+                    {"type": "tool_use", "id": "t2", "name": "mcp__claude_ai_Note_Box__get_note", "input": {}},
+                    {"type": "tool_use", "id": "t3", "name": "mcp__plugin_maker_box__fold", "input": {}},
+                    {"type": "tool_use", "id": "t4", "name": "mcp__silent__run", "input": {}},
+                    {"type": "tool_use", "id": "t5", "name": "Read", "input": {"file_path": "/p/x.md"}},
+                ])),
+                result("00:04", "t1", "text", false, json!({})),
+                result("00:04", "t2", "text", false, json!({})),
+                result("00:04", "t3", "text", false, json!({})),
+                result("00:04", "t4", "text", false, json!({})),
+                result("00:04", "t5", "text", false, json!({})),
+                answer("00:05", "m2", 10, json!([{"type": "text", "text": "Done."}])),
+            ],
+        );
+        let a = build("s", main, vec![]);
+        let server = |name: &str| a.spend.causes.iter().find(|c| c.name == name).unwrap().server_description.clone();
+        assert_eq!(server("mcp__notes__get_page").as_deref(), Some("This is a private note store."));
+        assert_eq!(server("mcp__claude_ai_Note_Box__get_note").as_deref(), Some("Note Box keeps notes."));
+        assert_eq!(server("mcp__plugin_maker_box__fold").as_deref(), Some("Box makes boxes."));
+        assert_eq!(server("mcp__silent__run"), None, "this server has no instructions");
+        assert_eq!(server("Read"), None);
+    }
+
+    #[test]
+    fn instructions_that_do_not_say_what_a_server_is_give_no_description() {
+        assert_eq!(server_description("## box\n**IMPORTANT: Load the tools first. Then call them."), None);
+        assert_eq!(server_description("## box\n# Box covers\n\none|two|three\n\n# Tools"), None);
+        assert_eq!(server_description("## box\n"), None);
+        assert_eq!(server_description("## box\nbox.example.com holds boxes.\nSecond line.").as_deref(), Some("box.example.com holds boxes."));
+    }
+
+    #[test]
+    fn a_long_tool_description_is_cut() {
+        let long = "word ".repeat(100);
+        let short = short_description(&long);
+        assert_eq!(short.chars().count(), DESCRIPTION_CHARS);
+        assert!(short.ends_with('…'));
     }
 
     /// A subagent's hand-back is a meta record. The next model call goes out

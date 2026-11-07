@@ -231,6 +231,10 @@ public struct Cause: Codable, Equatable, Sendable, Identifiable {
     public var errorCostMicros: UInt64
     public var avgContext: UInt64
     public var addedTokens: UInt64
+    /// The first paragraph of the tool's description; nil if the transcript has none.
+    public var description: String? = nil
+    /// For an MCP tool: the first sentence of its server's instructions, if they tell what the server is.
+    public var serverDescription: String? = nil
     /// Every call behind this cause, in time order (`Cause.items` in spend.rs).
     public var items: [CallCost]
     public var id: String { "\(kind.rawValue) \(name)" }

@@ -131,6 +131,12 @@ pub struct Cause {
     pub avg_context: u64,
     /// Tokens this cause added to contexts. Estimated (see `context.rs`).
     pub added_tokens: u64,
+    /// The first paragraph of the tool's description, from the transcript's
+    /// `api-request-shape` records. None if no record has this tool.
+    pub description: Option<String>,
+    /// For an MCP tool: the first sentence of its server's instructions, from
+    /// the `mcp_instructions_delta` records. None if they do not tell.
+    pub server_description: Option<String>,
     /// Every call behind this cause, in time order. For `Other`: the model
     /// calls with nothing before them, at their whole cost.
     pub items: Vec<CallCost>,
@@ -284,6 +290,8 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
             error_cost_micros: a.error_cost.round() as u64,
             avg_context: if a.calls > 0.0 { (a.context / a.calls).round() as u64 } else { 0 },
             added_tokens: a.added,
+            description: None,
+            server_description: None,
             items: cause_items(lanes, &a.items, &paid),
         })
         .collect();

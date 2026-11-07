@@ -423,7 +423,7 @@ struct CauseTable: View {
             SectionHeader(title: "By cause")
                 .help("After a tool result the model runs again and reads the whole context. A call after several results counts a part for each. Point at a row for its numbers; click it to see each call.")
             ForEach(causes) { c in
-                let look = look(c)
+                let look = c.look
                 // grid-template-columns: 24px 112px 1fr 52px; gap: 10px
                 HStack(spacing: 10) {
                     Image(systemName: look.symbol)
@@ -446,21 +446,25 @@ struct CauseTable: View {
                 }
                 .font(.system(size: SpendStyle.row))
                 .monospacedDigit()
-                .help(help(c))
+                .help(spend.help(c))
                 .clickableRow { model.openCause(c) }
                 .accessibilityHint("Shows each call of this cause")
             }
         }
     }
+}
 
+extension Cause {
     /// The symbol, its color, the tile behind it and the bar, as on the board.
-    private func look(_ c: Cause) -> (symbol: String, icon: Color, tile: Color, bar: Color) {
-        switch c.kind {
+    /// A tool with no look of its own gets a symbol for what it does.
+    var look: (symbol: String, icon: Color, tile: Color, bar: Color) {
+        switch kind {
         case .tool:
-            let t = Theme.tool(c.name)
+            let t = Theme.tool(name)
             switch t.symbol {
             case "doc.text": return (t.symbol, Theme.dynamic(0xA16207, 0xEAB308), t.color.opacity(0.14), t.color)
             case "terminal": return (t.symbol, t.color, t.color.opacity(0.12), t.color)
+            case Theme.tool("").symbol: return (ToolName(name).symbol, t.color, t.color.opacity(0.11), t.color)
             default: return (t.symbol, t.color, t.color.opacity(0.11), t.color)
             }
         case .prompt: return ("bubble.left", Theme.prompt, Theme.prompt.opacity(0.12), Theme.prompt)
@@ -468,25 +472,6 @@ struct CauseTable: View {
         case .compact: return ("arrow.down.right.and.arrow.up.left", Theme.warn, Theme.warn.opacity(0.12), Theme.warn)
         case .other: return ("flag", SpendStyle.text2, SpendStyle.neutralTile, SpendStyle.neutralBar)
         }
-    }
-
-    private func help(_ c: Cause) -> String {
-        let what = switch c.kind {
-        case .prompt: "Model calls right after one of your messages."
-        case .task: "The first call of a subagent, after the task its lead gave it."
-        case .compact: "Model calls right after a compaction."
-        case .other: "Model calls with nothing new before them in their lane: the start, with the system prompt."
-        case .tool:
-            c.errorCostMicros > 0
-                ? "Model calls after \(c.name) results. \(Format.dollars(c.errorCostMicros)) of it came after failed calls."
-                : "Model calls after \(c.name) results."
-        }
-        var lines = [what, "\(Format.dollars(c.costMicros)), \(Format.percent(spend.share(c.costMicros))) of the session."]
-        if c.count > 0 { lines.append("Count: \(c.count)" + (c.errors > 0 ? ", \(c.errors) failed" : "")) }
-        lines.append("Model calls: \(Int(c.modelCalls.rounded()))")
-        if c.avgContext > 0 { lines.append("Avg context: \(Format.tokens(c.avgContext))") }
-        if c.addedTokens > 0 { lines.append("Context added: \(Format.tokens(c.addedTokens)) (estimated)") }
-        return lines.joined(separator: "\n")
     }
 }
 
