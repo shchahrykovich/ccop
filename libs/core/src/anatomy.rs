@@ -83,6 +83,9 @@ pub struct Lane {
     pub events: Vec<Event>,
     /// The context at each model call, split into parts (see `context.rs`).
     pub context: Vec<ContextPoint>,
+    /// What is in the context of each call, item by item: the parts of
+    /// `context` before they are summed (see `context.rs`).
+    pub context_items: Vec<ContextItem>,
     /// What the `api-request-shape` records of this file say about each tool.
     /// `build` puts it on the causes; it is not part of the JSON.
     #[serde(skip)]
@@ -102,6 +105,23 @@ pub struct ContextPoint {
     pub total: u64,
     /// `total` split by what put it there. Estimated; adds up to `total`.
     pub parts: Vec<ContextPart>,
+}
+
+/// One thing in the context: a prompt, a tool result, an answer's output, a
+/// compaction's summary, `Start` or `Other`, and the calls that read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextItem {
+    /// Index into the lane's `events`: the prompt, the tool call, the answer
+    /// whose output it is, or the compaction. None for `Start` and `Other`.
+    pub event: Option<usize>,
+    /// The part of `ContextPoint.parts` it counts in.
+    pub part: String,
+    /// Indexes into the lane's `context`: the first and the last call whose
+    /// context held it with these tokens.
+    pub first_call: usize,
+    pub last_call: usize,
+    /// Estimated, as the parts are.
+    pub tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -296,6 +316,7 @@ impl LaneReader {
                 errors: 0,
                 events: Vec::new(),
                 context: Vec::new(),
+            context_items: Vec::new(),
             },
             fork: None,
             answer: None,
@@ -981,7 +1002,7 @@ pub fn result_bytes(content: &Value) -> u64 {
     }
 }
 
-fn clip(text: &str, max: usize) -> String {
+pub(crate) fn clip(text: &str, max: usize) -> String {
     let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one_line.chars().count() <= max {
         one_line

@@ -39,6 +39,7 @@ All commands take `--json`. `ID` is the start of a session id.
 | `ccop cause ID Bash` | The costliest calls of a tool or a program |
 | `ccop time ID` | Where the clock went: model, tools, subagents, waiting |
 | `ccop anatomy ID` | Everything about one session: turns, lanes, tools, tips |
+| `ccop context ID --call N` | What fills the context of one model call: files, commands, answers |
 | `ccop chat ID` | The texts of one lane |
 | `ccop call ID TOOL_USE_ID` | One tool call in full |
 | `ccop guide` | The instructions for agents |

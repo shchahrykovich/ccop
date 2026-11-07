@@ -118,6 +118,24 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// What fills the context of one model call: each file, command, prompt
+    /// and Claude's answers, with their tokens (estimated; the sum is exact).
+    Context {
+        id: String,
+        /// `main`, or a subagent's id (`Lane.id` in the anatomy).
+        #[arg(long, default_value = "main")]
+        lane: String,
+        /// The call: 1 is the lane's first. The last call if not given.
+        #[arg(long)]
+        call: Option<usize>,
+        /// One row per item: each read of a file and each answer on its own.
+        #[arg(long)]
+        each: bool,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the instructions for agents.
     Guide,
     /// Print the help page as HTML (used by the app build).
@@ -335,6 +353,26 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&timing)?);
             } else {
                 print!("{}", report::time(&s.title, &timing));
+            }
+        }
+        Command::Context { id, lane, call, each, limit, json } => {
+            let s = find(&scan.sessions, &id)?;
+            let a = anatomy::read(&s.id, std::path::Path::new(&s.transcript))?;
+            let l = a.lanes.iter().find(|l| l.id == lane).ok_or_else(|| {
+                let ids: Vec<&str> = a.lanes.iter().map(|l| l.id.as_str()).collect();
+                anyhow::anyhow!("this session has no lane {lane:?}; it has: {}", ids.join(", "))
+            })?;
+            let calls = l.context.len();
+            anyhow::ensure!(calls > 0, "lane {lane} has no model calls with token counts");
+            let n = call.unwrap_or(calls);
+            anyhow::ensure!((1..=calls).contains(&n), "lane {lane} has calls 1 to {calls}");
+            let mut c = ccop_core::context::contents(l, n - 1, each, Some(&s.project_dir)).expect("call is in range");
+            let rows = c.rows.len();
+            c.rows.truncate(limit);
+            if json {
+                println!("{}", serde_json::to_string(&c)?);
+            } else {
+                print!("{}", report::context(&s.id, &c, rows));
             }
         }
         Command::Anatomy { id, json } => {

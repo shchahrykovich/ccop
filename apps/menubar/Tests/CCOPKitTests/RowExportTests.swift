@@ -33,6 +33,18 @@ final class RowExportTests: XCTestCase {
         XCTAssertEqual(back, usage)
     }
 
+    func testAContextRowHasItsCallAndEachEventBehindIt() throws {
+        var l = lane("main", [event(.answer, at: 0), event(.tool, tool: "Read", id: "t1", at: 1), event(.tool, tool: "Read", id: "t2", at: 2), event(.answer, at: 3)])
+        l.context = [ContextPoint(at: t, event: 0, total: 100, parts: []), ContextPoint(at: t, event: 3, total: 900, parts: [])]
+        let row = ContextRow(part: "Tool: Read", label: "a.md", tokens: 800, events: [2, 1, 99])
+        let json = try object(RowExport.encode(RowExport.contextHolding(row, lane: l, call: 1, sessionID: "1a2b")))
+        XCTAssertEqual(json["call"] as? Int, 2)
+        XCTAssertEqual(json["context_tokens"] as? Int, 900)
+        XCTAssertEqual(json["label"] as? String, "a.md")
+        let items = try XCTUnwrap(json["items"] as? [[String: Any]])
+        XCTAssertEqual(items.map { $0["event_index"] as? Int }, [2, 1])
+    }
+
     func testAnEventComesBackTheSameWithItsDate() throws {
         let e = event(.tool, tool: "Read", id: "t1", at: 5)
         let back = try Session.makeDecoder().decode(AnatomyEvent.self, from: RowExport.encode(e))

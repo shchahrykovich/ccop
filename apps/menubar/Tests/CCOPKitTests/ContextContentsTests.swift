@@ -1,0 +1,66 @@
+import Foundation
+import XCTest
+@testable import CCOPKit
+
+final class ContextContentsTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func event(_ kind: EventKind, _ text: String? = nil, tool: String? = nil) -> AnatomyEvent {
+        var e = AnatomyEvent(kind: kind, start: t0, end: t0, isError: false)
+        e.text = text
+        e.tool = tool
+        return e
+    }
+
+    /// Two reads of one file, two answers and Start, at call 2 of 3; the
+    /// second answer and the second read end at call 2.
+    private var lane: AnatomyLane {
+        let events = [
+            event(.prompt, "read it"),
+            event(.answer, "Reading"),
+            event(.tool, "/p/docs/big.md", tool: "Read"),
+            event(.answer, "Again"),
+            event(.tool, "/p/docs/big.md", tool: "Read"),
+            event(.answer, "Done"),
+        ]
+        var lane = AnatomyLane(id: "main", name: "Main session", usage: TokenUsage(), toolCalls: 2, errors: 0, events: events, context: [])
+        lane.contextItems = [
+            ContextItem(event: nil, part: "Start", firstCall: 0, lastCall: 2, tokens: 20_000),
+            ContextItem(event: 1, part: "Claude output", firstCall: 1, lastCall: 2, tokens: 100),
+            ContextItem(event: 2, part: "Tool: Read", firstCall: 1, lastCall: 2, tokens: 3000),
+            ContextItem(event: 3, part: "Claude output", firstCall: 2, lastCall: 2, tokens: 50),
+            ContextItem(event: 4, part: "Tool: Read", firstCall: 2, lastCall: 2, tokens: 1000),
+        ]
+        return lane
+    }
+
+    func testOneFileReadTwiceIsOneRowAndTheAnswersAreOneRow() {
+        let rows = ContextContents.rows(lane, call: 2, each: false, dir: "/p")
+        XCTAssertEqual(rows.map(\.label), ["Start", "docs/big.md", "Claude output"])
+        XCTAssertEqual(rows.map(\.tokens), [20_000, 4000, 150])
+        XCTAssertEqual(rows[1].events, [2, 4])
+        XCTAssertEqual(rows[2].events, [1, 3])
+    }
+
+    func testEachItemIsItsOwnRow() {
+        let rows = ContextContents.rows(lane, call: 2, each: true, dir: nil)
+        XCTAssertEqual(rows.map(\.label), ["Start", "/p/docs/big.md", "/p/docs/big.md", "Reading", "Again"])
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.tokens }, 24_150)
+    }
+
+    func testAnEarlierCallHoldsOnlyWhatCameBeforeIt() {
+        XCTAssertEqual(ContextContents.rows(lane, call: 0, each: false, dir: nil).map(\.label), ["Start"])
+        XCTAssertEqual(ContextContents.rows(lane, call: 1, each: false, dir: "/p").map(\.label), ["Start", "docs/big.md", "Claude output"])
+        XCTAssertEqual(ContextContents.rows(lane, call: 5, each: false, dir: nil), [])
+    }
+
+    func testPathsAreShownFromTheProjectFolder() {
+        XCTAssertEqual(ContextContents.inFolder("/Users/me/shop/src/a.rs", "/Users/me/shop"), "src/a.rs")
+        XCTAssertEqual(ContextContents.inFolder("/Users/me/shop/src/a.rs", "/Users/me/shop/"), "src/a.rs")
+        XCTAssertEqual(ContextContents.inFolder("/Users/me/shopping/a.rs", "/Users/me/shop"), "/Users/me/shopping/a.rs")
+        XCTAssertEqual(ContextContents.inFolder("…ers/me/shop/src/a.rs", "/Users/me/shop"), "src/a.rs")
+        XCTAssertEqual(ContextContents.inFolder("…ers/me/other/a.rs", "/Users/me/shop"), "…ers/me/other/a.rs")
+        XCTAssertEqual(ContextContents.inFolder("Read the plan", "/Users/me/shop"), "Read the plan")
+        XCTAssertEqual(ContextContents.inFolder("/Users/me/shop/a.rs", ""), "/Users/me/shop/a.rs")
+    }
+}

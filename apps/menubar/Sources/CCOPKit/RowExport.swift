@@ -35,6 +35,27 @@ public enum RowExport {
         public var spend: LaneSpend?
     }
 
+    /// One row of what a call's context holds, with the events behind it.
+    public struct ContextHolding: Encodable, Sendable {
+        public var sessionId: String
+        public var lane: String
+        /// 1 for the lane's first call.
+        public var call: Int
+        public var contextTokens: UInt64
+        public var part: String
+        public var label: String
+        /// Estimated.
+        public var tokens: UInt64
+        public var items: [Call]
+    }
+
+    public static func contextHolding(_ row: ContextRow, lane: AnatomyLane, call: Int, sessionID: String) -> ContextHolding {
+        let items = row.events.filter { lane.events.indices.contains($0) }.map { Self.call(sessionID: sessionID, lane: lane, event: $0) }
+        let total = lane.context.indices.contains(call) ? lane.context[call].total : 0
+        return ContextHolding(sessionId: sessionID, lane: lane.id, call: call + 1, contextTokens: total,
+                              part: row.part, label: row.label, tokens: row.tokens, items: items)
+    }
+
     public static func call(sessionID: String, lane: AnatomyLane, event: Int, call: ToolCall? = nil, text: String? = nil) -> Call {
         Call(sessionId: sessionID, lane: lane.id, laneName: lane.name, eventIndex: event, event: lane.events[event], call: call, text: text)
     }

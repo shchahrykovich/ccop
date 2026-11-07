@@ -202,7 +202,7 @@ struct AnatomyLoader: View {
                 case .chat: ChatView(session: session, anatomy: a).id(session.id)
                 case .anatomy: AnatomyView(session: session, anatomy: a)
                 // A new session starts with nothing chosen on the charts.
-                default: ContextView(anatomy: a).id(session.id)
+                default: ContextView(session: session, anatomy: a).id(session.id)
                 }
             case let .failed(why):
                 VStack(spacing: 8) {

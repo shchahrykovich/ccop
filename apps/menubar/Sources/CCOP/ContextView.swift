@@ -31,6 +31,7 @@ private enum Ink {
 
 /// What filled the context window, call by call, and what added the most.
 struct ContextView: View {
+    let session: Session
     let anatomy: Anatomy
     @State private var laneID = "main"
     /// The call under the pointer and the call chosen with a click. With
@@ -66,6 +67,8 @@ struct ContextView: View {
                             .frame(width: wide ? Self.asideBasis + free / 1000 : nil)
                             .frame(maxWidth: wide ? nil : .infinity)
                     }
+                    ContextHoldings(sessionID: anatomy.sessionId, dir: session.projectDir, lane: lane, call: index)
+                        .frame(maxWidth: 900, alignment: .leading)
                 } else {
                     Text("This session has no model calls with token counts.")
                         .font(.system(size: 13)).foregroundStyle(Ink.text3)
@@ -511,6 +514,188 @@ struct ContextBreakdown: View {
         if parts.count > 1 || parts.first.map({ ContextColors.label($0.name, main: main) != ContextColors.label(series, main: main) }) == true {
             lines += parts.map { "\(ContextColors.label($0.name, main: main)): \(Format.tokens($0.tokens))" }
         }
+        return lines.joined(separator: "\n")
+    }
+}
+
+/// What the shown call's context holds: one row per file, command, prompt,
+/// and one for Claude's answers (or one per item), largest first. It follows
+/// the call under the pointer, as the side panel does.
+struct ContextHoldings: View {
+    @Environment(AppModel.self) private var model
+    let sessionID: String
+    let dir: String
+    let lane: AnatomyLane
+    /// An index into `lane.context`.
+    let call: Int
+    @State private var each = false
+    @State private var showAll = false
+    /// The most rows a call of this lane has, so the list keeps its height
+    /// while the pointer moves from call to call.
+    @State private var most: Int?
+    @State private var shownCall: CallRef?
+
+    private static let limit = 15
+
+    var body: some View {
+        let rows = ContextContents.rows(lane, call: call, each: each, dir: dir)
+        let total = lane.context.indices.contains(call) ? lane.context[call].total : 0
+        let shown = showAll ? rows : Array(rows.prefix(Self.limit))
+        let reserved = showAll ? 0 : max(min(most ?? 0, Self.limit) - shown.count, 0)
+        let widths = HoldingRow.Widths(shown, total: total)
+        VStack(alignment: .leading, spacing: 6) {
+            FlowRows(spacing: 14, lineSpacing: 8) {
+                Text("What is in the context at call \(call + 1)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                Picker("", selection: $each) {
+                    Text("By file and command").tag(false)
+                    Text("Each addition").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .help("By file and command: the reads of one file are one row, and Claude's answers are one row. Each addition: every prompt, tool result and answer on its own.")
+            }
+            Text("Tokens of this call's context. Each row is estimated; together they make the exact size. Start is the system prompt, the tools, CLAUDE.md and the first prompt. Other is text that came with no prompt or tool call before it.")
+                .font(.system(size: 12)).foregroundStyle(Ink.text3)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(shown) { row in
+                    Rectangle().fill(Ink.line2).frame(height: 1)
+                    let target = target(row)
+                    HoldingRow(row: row, total: total, main: lane.id == "main", widths: widths, action: target.map { t in { open(t) } })
+                        .rowMenu(view: viewAction(target),
+                                 goTo: target.map { t in { model.openInChat(ChatPlace(lane: lane.id, event: t)) } },
+                                 fileName: RowExport.fileName(sessionID: sessionID, name: "context call \(call + 1) \(row.label)"),
+                                 json: { try RowExport.encode(RowExport.contextHolding(row, lane: lane, call: call, sessionID: sessionID)) })
+                }
+                // Empty rows, so the page below does not move with the pointer.
+                ForEach(0 ..< reserved, id: \.self) { _ in
+                    Color.clear.frame(height: HoldingRow.height + 1)
+                }
+            }
+            .font(.system(size: 12.5))
+            .monospacedDigit()
+            .padding(.top, 4)
+            if rows.count > Self.limit {
+                Button(showAll ? "Show the largest \(Self.limit)" : "Show all \(rows.count)") { showAll.toggle() }
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
+        }
+        .task(id: "\(lane.id) \(each)") {
+            most = ContextContents.mostRows(lane, each: each, dir: dir)
+        }
+        .sheet(item: $shownCall) { ref in
+            if lane.events.indices.contains(ref.index) {
+                CallSheet(sessionID: sessionID, lane: lane, index: ref.index)
+            }
+        }
+    }
+
+    /// The event a click opens: the largest of the row's. None for Start and Other.
+    private func target(_ row: ContextRow) -> Int? {
+        row.events.first { lane.events.indices.contains($0) }
+    }
+
+    /// The menu's View: only a tool call can be shown in full.
+    private func viewAction(_ target: Int?) -> (() -> Void)? {
+        guard let target, lane.events[target].hasFullCall else { return nil }
+        return { open(target) }
+    }
+
+    private func open(_ event: Int) {
+        if lane.events[event].hasFullCall {
+            shownCall = CallRef(lane: lane.id, index: event)
+        } else {
+            model.openInChat(ChatPlace(lane: lane.id, event: event))
+        }
+    }
+}
+
+/// One row of `ContextHoldings`: tokens, share, part, what it is, how many times.
+private struct HoldingRow: View {
+    let row: ContextRow
+    let total: UInt64
+    let main: Bool
+    let widths: Widths
+    /// Nil: the row opens nothing (Start, Other).
+    let action: (() -> Void)?
+    @State private var hovering = false
+
+    static let height: CGFloat = 30
+    private static let inset: CGFloat = 6
+
+    struct Widths {
+        var tokens: CGFloat = 48
+        var share: CGFloat = 36
+        var part: CGFloat = 70
+        var times: CGFloat = 0
+
+        init(_ rows: [ContextRow], total: UInt64) {
+            let bold = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .semibold)
+            let plain = NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .regular)
+            for row in rows {
+                tokens = max(tokens, textWidth(Format.tokens(row.tokens), bold) + 10)
+                share = max(share, textWidth(HoldingRow.share(row.tokens, total), plain) + 10)
+                part = max(part, textWidth(ContextColors.label(row.part, main: true), plain) + 14 + 14)
+                if row.events.count > 1 { times = max(times, textWidth("×\(row.events.count)", plain) + 12) }
+            }
+        }
+    }
+
+    nonisolated static func share(_ tokens: UInt64, _ total: UInt64) -> String {
+        Format.percent(total == 0 ? 0 : Double(tokens) / Double(total))
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(Format.tokens(row.tokens)).fontWeight(.semibold)
+                .frame(width: widths.tokens, alignment: .leading)
+            Text(Self.share(row.tokens, total)).foregroundStyle(Ink.text3)
+                .frame(width: widths.share, alignment: .leading)
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 2).fill(ContextColors.color(row.part)).frame(width: 8, height: 8)
+                Text(ContextColors.label(row.part, main: main)).lineLimit(1).fixedSize()
+            }
+            .frame(width: widths.part, alignment: .leading)
+            Text(row.label == row.part ? "" : row.label)
+                .font(.system(size: 11.5, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if widths.times > 0 {
+                Text(row.events.count > 1 ? "×\(row.events.count)" : "")
+                    .foregroundStyle(Ink.text3)
+                    .frame(width: widths.times, alignment: .trailing)
+            }
+        }
+        .frame(height: Self.height)
+        .padding(.horizontal, Self.inset)
+        .background(hovering ? Ink.soft : .clear, in: RoundedRectangle(cornerRadius: 4))
+        .padding(.horizontal, -Self.inset)
+        .contentShape(Rectangle())
+        .help(help)
+        .onHover { inside in
+            guard action != nil, inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear {
+            if hovering { NSCursor.pop() }
+            hovering = false
+        }
+        .onTapGesture { action?() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(action == nil ? [] : .isButton)
+    }
+
+    private var help: String {
+        var lines = [row.label]
+        if row.events.count > 1 {
+            lines.append(row.part == "Claude output" ? "\(row.events.count) answers" : "In the context \(row.events.count) times")
+        }
+        if action != nil { lines.append("Click to see the largest one") }
         return lines.joined(separator: "\n")
     }
 }

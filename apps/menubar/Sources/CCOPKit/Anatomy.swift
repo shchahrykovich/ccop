@@ -81,6 +81,8 @@ public struct AnatomyLane: Codable, Equatable, Sendable, Identifiable {
     public var errors: UInt64
     public var events: [AnatomyEvent]
     public var context: [ContextPoint]
+    /// What each call's context holds, item by item (`ContextContents`).
+    public var contextItems: [ContextItem] = []
 
     public var duration: TimeInterval {
         guard let s = startedAt, let e = endedAt else { return 0 }
@@ -171,6 +173,26 @@ public struct ContextPoint: Codable, Equatable, Sendable {
     public var event: Int
     public var total: UInt64
     public var parts: [ContextPart]
+}
+
+/// One prompt, tool result, answer's output, summary, `Start` or `Other` in
+/// the context of the calls `firstCall...lastCall` (indexes into `context`).
+/// The items of a call add up to its parts.
+public struct ContextItem: Codable, Equatable, Sendable {
+    /// Index into the lane's `events`; nil for `Start` and `Other`.
+    public var event: Int?
+    public var part: String
+    public var firstCall: Int
+    public var lastCall: Int
+    public var tokens: UInt64
+
+    public init(event: Int?, part: String, firstCall: Int, lastCall: Int, tokens: UInt64) {
+        self.event = event
+        self.part = part
+        self.firstCall = firstCall
+        self.lastCall = lastCall
+        self.tokens = tokens
+    }
 }
 
 public struct ContextPart: Codable, Equatable, Sendable {

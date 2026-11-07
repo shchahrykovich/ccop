@@ -309,6 +309,50 @@
             }
           ]
         }
+      ],
+      "context_items": [
+        {
+          "event": null,
+          "part": "Start",
+          "first_call": 0,
+          "last_call": 1,
+          "tokens": 20003
+        },
+        {
+          "event": 1,
+          "part": "Claude output",
+          "first_call": 1,
+          "last_call": 1,
+          "tokens": 120
+        },
+        {
+          "event": 2,
+          "part": "Tool: Read",
+          "first_call": 1,
+          "last_call": 1,
+          "tokens": 1578
+        },
+        {
+          "event": 3,
+          "part": "Tool: Agent",
+          "first_call": 1,
+          "last_call": 1,
+          "tokens": 3
+        },
+        {
+          "event": null,
+          "part": "Start",
+          "first_call": 2,
+          "last_call": 2,
+          "tokens": 20003
+        },
+        {
+          "event": 5,
+          "part": "Compacted summary",
+          "first_call": 2,
+          "last_call": 2,
+          "tokens": 2498
+        }
       ]
     },
     {
@@ -468,6 +512,29 @@
               "tokens": 251
             }
           ]
+        }
+      ],
+      "context_items": [
+        {
+          "event": null,
+          "part": "Start",
+          "first_call": 0,
+          "last_call": 1,
+          "tokens": 9002
+        },
+        {
+          "event": 1,
+          "part": "Claude output",
+          "first_call": 1,
+          "last_call": 1,
+          "tokens": 50
+        },
+        {
+          "event": 2,
+          "part": "Tool: WebSearch",
+          "first_call": 1,
+          "last_call": 1,
+          "tokens": 251
         }
       ]
     }

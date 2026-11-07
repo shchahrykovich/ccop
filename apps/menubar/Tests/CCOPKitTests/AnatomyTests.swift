@@ -9,6 +9,22 @@ final class AnatomyContractTests: XCTestCase {
         SessionContractTests.example.deletingLastPathComponent().appendingPathComponent("anatomy.example.json")
     }
 
+    /// At every call of every lane, the items add up to each part and to
+    /// the size, as `context.rs` makes them.
+    func testTheContextItemsOfEachCallAddUpToItsParts() throws {
+        let a = try Anatomy.decode(Data(contentsOf: Self.example))
+        XCTAssertFalse(a.lanes[0].contextItems.isEmpty)
+        for lane in a.lanes {
+            for (call, point) in lane.context.enumerated() {
+                let rows = ContextContents.rows(lane, call: call, each: true, dir: nil)
+                XCTAssertEqual(rows.reduce(0) { $0 + $1.tokens }, point.total, "\(lane.id) call \(call)")
+                for part in point.parts {
+                    XCTAssertEqual(rows.filter { $0.part == part.name }.reduce(0) { $0 + $1.tokens }, part.tokens, "\(lane.id) call \(call) \(part.name)")
+                }
+            }
+        }
+    }
+
     func testTheExampleDecodes() throws {
         let a = try Anatomy.decode(Data(contentsOf: Self.example))
         XCTAssertEqual(a.sessionId, "s1")

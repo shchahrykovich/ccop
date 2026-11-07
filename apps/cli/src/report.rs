@@ -1,9 +1,11 @@
-//! The text of the short reports for agents: `brief`, `top`, `cause`, `time`.
+//! The text of the short reports for agents: `brief`, `top`, `cause`, `time`,
+//! `context`.
 //! Short on purpose: each byte goes into an agent's context. Every report
 //! ends with the commands to go further.
 
 use std::fmt::Write;
 
+use ccop_core::context::Contents;
 use ccop_core::rollup::{Brief, By, CauseReport, Rollup, Row, What};
 use ccop_core::short;
 use ccop_core::spend::dollars;
@@ -256,6 +258,24 @@ pub fn time(title: &str, t: &Timing) -> String {
             let _ = writeln!(out, "  #{:<3} {:>7}  {} tools, {} subagents  {}", turn.index, ms(turn.ms), turn.tool_calls, turn.subagents, cut(&turn.prompt, 50));
         }
     }
+    out
+}
+
+/// `ccop context`: `total_rows` is the number of rows before `--limit`.
+pub fn context(session: &str, c: &Contents, total_rows: usize) -> String {
+    let mut out = String::new();
+    let lane = if c.lane == "main" { String::new() } else { format!(" lane {}", c.lane) };
+    let _ = writeln!(out, "CONTEXT {}{lane} call {} of {}: {} tokens (exact; the rows are estimated)", id8(session), c.call, c.calls, short(c.total));
+    let total = c.total.max(1) as f64;
+    for r in &c.rows {
+        let times = if r.events.len() > 1 { format!("{}x", r.events.len()) } else { String::new() };
+        let part = r.part.strip_prefix("Tool: ").unwrap_or(&r.part);
+        let _ = writeln!(out, "  {:>6}  {:>3.0}%  {:>4}  {:<14}  {}", short(r.tokens), r.tokens as f64 * 100.0 / total, times, cut(part, 14), cut(&r.label, 80));
+    }
+    if c.rows.len() < total_rows {
+        let _ = writeln!(out, "{} more: --limit", total_rows - c.rows.len());
+    }
+    let _ = writeln!(out, "NEXT: ccop context {} --call N (another call), --each (each read on its own), ccop call {} TOOL_USE_ID --max-bytes 4000 (with --json)", id8(session), id8(session));
     out
 }
 
