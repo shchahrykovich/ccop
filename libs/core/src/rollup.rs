@@ -481,13 +481,14 @@ fn find_cause<'a>(causes: &'a [Cause], name: &str) -> Option<&'a Cause> {
     let want = match name.to_lowercase().as_str() {
         "prompts" => "your prompts".to_string(),
         "tasks" => "tasks from the lead".to_string(),
+        "reports" => "subagent reports".to_string(),
         other => other.to_string(),
     };
     causes.iter().find(|c| c.name.to_lowercase() == want)
 }
 
-/// The calls behind a cause (a tool's name, `prompts`, `tasks`, `compaction`,
-/// `other`) or behind a Bash program (`sed`). The error lists what there is.
+/// The calls behind a cause (a tool's name, `prompts`, `tasks`, `reports`,
+/// `compaction`, `other`) or behind a Bash program (`sed`). The error lists what there is.
 pub fn cause_report(a: &Anatomy, name: &str, by: By, limit: usize) -> Result<CauseReport, Vec<String>> {
     let spend = &a.spend;
     let lower = name.to_lowercase();

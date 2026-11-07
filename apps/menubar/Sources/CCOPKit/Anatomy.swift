@@ -117,7 +117,9 @@ public struct AnatomyLane: Codable, Equatable, Sendable, Identifiable {
 }
 
 public enum EventKind: String, Codable, Sendable {
-    case prompt, answer, tool, compact, error
+    /// `report`: a background subagent's report, or a message from another
+    /// session; `agentId` is the sender.
+    case prompt, answer, tool, compact, error, report
 }
 
 public struct AnatomyEvent: Codable, Equatable, Sendable {
@@ -164,6 +166,7 @@ public struct AnatomyEvent: Codable, Equatable, Sendable {
         case .tool: tool ?? "Tool"
         case .compact: "Compaction"
         case .error: "API error"
+        case .report: "Subagent report"
         }
     }
 }
@@ -239,7 +242,7 @@ public struct Spend: Codable, Equatable, Sendable {
 }
 
 public enum CauseKind: String, Codable, Sendable {
-    case prompt, task, tool, compact, other
+    case prompt, task, tool, compact, report, other
 }
 
 public struct Cause: Codable, Equatable, Sendable, Identifiable {

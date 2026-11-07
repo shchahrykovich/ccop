@@ -27,6 +27,7 @@ pub const START: &str = "Start";
 pub const OUTPUT: &str = "Claude output";
 pub const PROMPTS: &str = "Prompts";
 pub const SUMMARY: &str = "Compacted summary";
+pub const REPORTS: &str = "Subagent reports";
 pub const OTHER: &str = "Other";
 
 pub fn tool_part(tool: &str) -> String {
@@ -63,7 +64,7 @@ pub fn analyze(lane: &mut Lane) {
     };
     for i in 0..lane.events.len() {
         match lane.events[i].kind {
-            EventKind::Prompt | EventKind::Tool => pending.push(i),
+            EventKind::Prompt | EventKind::Tool | EventKind::Report => pending.push(i),
             EventKind::Compact => compacted = Some(i),
             EventKind::Error => {}
             EventKind::Answer => {
@@ -94,6 +95,7 @@ pub fn analyze(lane: &mut Lane) {
                                 let e = &lane.events[p];
                                 match e.kind {
                                     EventKind::Tool => (p, tool_part(e.tool.as_deref().unwrap_or("tool")), e.result_bytes.unwrap_or(0)),
+                                    EventKind::Report => (p, REPORTS.to_string(), e.result_bytes.unwrap_or(0)),
                                     _ => (p, PROMPTS.to_string(), e.text.as_ref().map_or(0, |t| t.len() as u64)),
                                 }
                             })
@@ -189,14 +191,23 @@ pub struct ContentRow {
 /// The rows of call `call` (an index into `lane.context`). Grouped: one row
 /// per file, command or prompt, and one for all of Claude's answers. With
 /// `each`: one row per item. A path in the project folder `dir` is shown
-/// from that folder.
-pub fn contents(lane: &Lane, call: usize, each: bool, dir: Option<&str>) -> Option<Contents> {
+/// from that folder. A subagent's report is named by its lane in `lanes`
+/// (the session's lanes): one row per subagent, grouped.
+pub fn contents(lane: &Lane, call: usize, each: bool, dir: Option<&str>, lanes: &[Lane]) -> Option<Contents> {
     let point = lane.context.get(call)?;
     let mut rows: Vec<ContentRow> = Vec::new();
     for it in items_at(lane, call) {
         let event = it.event.and_then(|e| lane.events.get(e));
         let label = match event {
             Some(e) if e.kind == EventKind::Answer && !each => it.part.clone(),
+            Some(e) if e.kind == EventKind::Report => {
+                let from = e.agent_id.as_deref().unwrap_or("another agent");
+                let name = lanes.iter().find(|l| l.id == from).map_or_else(|| format!("from {from}"), |l| l.name.clone());
+                match (&e.text, each) {
+                    (Some(t), true) => crate::anatomy::clip(&format!("{name}: {t}"), crate::anatomy::SUMMARY_CHARS),
+                    _ => name,
+                }
+            }
             Some(e) => e
                 .text
                 .as_deref()
@@ -402,16 +413,16 @@ mod tests {
             r.feed(&line);
         }
         let lane = r.finish();
-        let c = contents(&lane, 2, false, Some("/p")).unwrap();
+        let c = contents(&lane, 2, false, Some("/p"), &[]).unwrap();
         assert_eq!((c.call, c.calls, c.total), (3, 3, 24_150));
         let rows: Vec<(&str, u64, usize)> = c.rows.iter().map(|r| (r.label.as_str(), r.tokens, r.events.len())).collect();
         assert_eq!(rows, [("Start", 20_000, 0), ("big.md", 4000, 2), (OUTPUT, 150, 2)]);
         assert_eq!(c.rows[1].tool_use_ids, ["r1", "r2"]);
-        let each = contents(&lane, 2, true, None).unwrap();
+        let each = contents(&lane, 2, true, None, &[]).unwrap();
         assert_eq!(each.rows[1].label, "/p/big.md");
         assert_eq!(each.rows.len(), 5);
         assert_eq!(each.rows.iter().map(|r| r.tokens).sum::<u64>(), 24_150);
-        assert!(contents(&lane, 3, false, None).is_none());
+        assert!(contents(&lane, 3, false, None, &[]).is_none());
     }
 
     #[test]
@@ -423,6 +434,47 @@ mod tests {
         assert_eq!(in_folder("…ers/me/other/a.rs", "/Users/me/shop"), "…ers/me/other/a.rs");
         assert_eq!(in_folder("Read the plan", "/Users/me/shop"), "Read the plan");
         assert_eq!(in_folder("/Users/me/shop/a.rs", ""), "/Users/me/shop/a.rs");
+    }
+
+    /// A background subagent's report comes back as a meta user record, not
+    /// as a tool result (checked 2026-11-07: 87% of the "Other" tokens of 686
+    /// files were these). Its tokens are a part of their own.
+    #[test]
+    fn a_subagents_report_is_its_own_part_not_other() {
+        let report = "Another Claude session sent a message:\n<agent-message from=\"af64\">\n[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n  **Step 7 is done.** All checks pass.\n</agent-message>";
+        let mut r = LaneReader::main().with_chat();
+        for line in [
+            json!({"type": "user", "timestamp": "2026-11-02T10:00:00Z", "message": {"content": "draft it"}}).to_string(),
+            answer("01", "a1", 20_000, 100, json!([{"type": "tool_use", "id": "g1", "name": "Agent", "input": {"description": "Draft", "run_in_background": true}}])),
+            result("02", "g1", 100),
+            answer("03", "a2", 20_200, 50, json!([])),
+            json!({"type": "user", "isMeta": true, "timestamp": "2026-11-02T10:00:04Z", "message": {"content": report}}).to_string(),
+            answer("05", "a3", 23_250, 10, json!([])),
+        ] {
+            r.feed(&line);
+        }
+        let (lane, chat) = r.finish_with_chat();
+        let e = lane.events.iter().position(|e| serde_json::to_value(e.kind).unwrap() == "report").expect("a report event");
+        assert_eq!(lane.events[e].agent_id.as_deref(), Some("af64"));
+        assert_eq!(lane.events[e].text.as_deref(), Some("**Step 7 is done.** All checks pass."));
+        assert_eq!(lane.events[e].added_tokens, Some(3000));
+        assert_eq!(chat.iter().find(|c| c.event == e).and_then(|c| c.text.as_deref()), Some(report));
+        let last = lane.context.last().unwrap();
+        let parts: Vec<(&str, u64)> = last.parts.iter().map(|p| (p.name.as_str(), p.tokens)).collect();
+        assert!(parts.contains(&("Subagent reports", 3000)), "{parts:?}");
+        assert!(!parts.iter().any(|(n, _)| *n == OTHER), "{parts:?}");
+        // Spend: the call after the report is the report's, not "Other".
+        let spend = crate::spend::analyze(std::slice::from_ref(&lane));
+        let names: Vec<&str> = spend.causes.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"Subagent reports") && !names.contains(&"Other"), "{names:?}");
+        // `ccop context` names the report by its subagent's lane.
+        let mut helper = lane.clone();
+        helper.id = "af64".into();
+        helper.name = "Draft (general-purpose)".into();
+        let rows = contents(&lane, 2, false, None, &[lane.clone(), helper]).unwrap().rows;
+        assert!(rows.iter().any(|r| r.part == REPORTS && r.label == "Draft (general-purpose)" && r.tokens == 3000), "{rows:?}");
+        let rows = contents(&lane, 2, true, None, &[]).unwrap().rows;
+        assert!(rows.iter().any(|r| r.label == "from af64: **Step 7 is done.** All checks pass."), "{rows:?}");
     }
 
     #[test]

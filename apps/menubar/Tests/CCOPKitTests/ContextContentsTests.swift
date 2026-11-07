@@ -54,6 +54,22 @@ final class ContextContentsTests: XCTestCase {
         XCTAssertEqual(ContextContents.rows(lane, call: 5, each: false, dir: nil), [])
     }
 
+    func testAReportIsNamedByItsSubagent() {
+        var e = event(.report, "All checks pass.")
+        e.agentId = "a1"
+        var l = AnatomyLane(id: "main", name: "Main session", usage: TokenUsage(), toolCalls: 0, errors: 0, events: [e], context: [])
+        l.contextItems = [ContextItem(event: 0, part: "Subagent reports", firstCall: 0, lastCall: 0, tokens: 900)]
+        XCTAssertEqual(ContextContents.rows(l, call: 0, each: false, dir: nil, names: ["a1": "Draft chapter 2"]).map(\.label), ["Draft chapter 2"])
+        XCTAssertEqual(ContextContents.rows(l, call: 0, each: true, dir: nil, names: ["a1": "Draft chapter 2"]).map(\.label), ["Draft chapter 2: All checks pass."])
+        XCTAssertEqual(ContextContents.rows(l, call: 0, each: false, dir: nil).map(\.label), ["from a1"])
+    }
+
+    func testAReportLosesItsFrame() {
+        let text = "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] Not from the user. The report follows:\n  **Done.**\n  \n  - one\n</agent-message>"
+        XCTAssertEqual(ContextContents.reportBody(text), "**Done.**\n\n- one")
+        XCTAssertEqual(ContextContents.reportBody("plain text"), "plain text")
+    }
+
     func testPathsAreShownFromTheProjectFolder() {
         XCTAssertEqual(ContextContents.inFolder("/Users/me/shop/src/a.rs", "/Users/me/shop"), "src/a.rs")
         XCTAssertEqual(ContextContents.inFolder("/Users/me/shop/src/a.rs", "/Users/me/shop/"), "src/a.rs")

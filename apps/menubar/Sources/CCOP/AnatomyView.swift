@@ -26,6 +26,7 @@ enum Palette {
         case .tool: tool(e.tool)
         case .compact: compact
         case .error: error
+        case .report: Theme.agent
         }
     }
 }
@@ -529,8 +530,8 @@ struct TimelineChart: View {
                 }
             }
 
-            // Compactions and prompts, on top.
-            for e in lane.events where e.kind == .compact || e.kind == .prompt {
+            // Compactions, prompts and subagent reports, on top.
+            for e in lane.events where e.kind == .compact || e.kind == .prompt || e.kind == .report {
                 let x0 = x(e.start, w)
                 guard x0 >= -6, x0 <= w + 6 else { continue }
                 if e.kind == .compact {
@@ -538,7 +539,7 @@ struct TimelineChart: View {
                 } else {
                     let dot = CGRect(x: x0 - 3.5, y: y + 3, width: 7, height: 7)
                     ctx.fill(Path(ellipseIn: dot.insetBy(dx: -2, dy: -2)), with: .color(Ink.bg))
-                    ctx.fill(Path(ellipseIn: dot), with: .color(Theme.prompt))
+                    ctx.fill(Path(ellipseIn: dot), with: .color(e.kind == .report ? Theme.agent : Theme.prompt))
                 }
             }
 
@@ -569,7 +570,7 @@ struct TimelineChart: View {
         switch e.kind {
         case .answer: return CGRect(x: x0, y: y + Self.callTop, width: max(1.5, x1 - x0), height: Self.callHeight)
         case .tool: return CGRect(x: x0, y: y + Self.toolTop, width: max(2, x1 - x0), height: Self.toolHeight)
-        case .prompt: return CGRect(x: x0 - 3.5, y: y + 3, width: 7, height: 7)
+        case .prompt, .report: return CGRect(x: x0 - 3.5, y: y + 3, width: 7, height: 7)
         case .compact: return CGRect(x: x0 - 1, y: y + 1, width: 2, height: Self.laneHeight - 2)
         case .error:
             let cy = y + Self.callTop + Self.callHeight / 2
@@ -635,12 +636,12 @@ struct TimelineChart: View {
         var best: (index: Int, rank: Int, dist: CGFloat)?
         for (i, e) in lane.events.enumerated() {
             let rank: Int? = switch (e.kind, top) {
-            case (.prompt, true), (.compact, _), (.error, true): 0
+            case (.prompt, true), (.report, true), (.compact, _), (.error, true): 0
             case (.answer, true), (.tool, false): 1
             default: nil
             }
             guard let rank else { continue }
-            let pointLike = e.kind == .prompt || e.kind == .compact || e.kind == .error
+            let pointLike = e.kind == .prompt || e.kind == .report || e.kind == .compact || e.kind == .error
             let x0 = x(e.start, width) - (pointLike ? 5 : 2)
             let x1 = max(x(e.end, width), x(e.start, width) + 2) + (pointLike ? 5 : 2)
             guard p.x >= x0, p.x <= x1 else { continue }
@@ -769,6 +770,8 @@ private struct EventCallout: View {
             Text([e.label, shortModel(e.model)].compactMap { $0 }.joined(separator: " · ")).fontWeight(.medium)
         case .prompt:
             Text(e.text.map { "“\($0)”" } ?? "Prompt")
+        case .report:
+            Text(e.text.map { "Subagent report: “\($0)”" } ?? "Subagent report")
         case .compact, .error:
             Text(e.text ?? e.label).fontWeight(.medium)
         }
@@ -785,7 +788,7 @@ private struct EventCallout: View {
         case .tool:
             if let t = e.addedTokens { parts.append("+\(Format.tokens(t)) to context") }
             if e.isError { parts.append(e.refusal != nil ? "refused" : "failed") }
-        case .prompt:
+        case .prompt, .report:
             parts = []
             if let t = e.addedTokens { parts.append("+\(Format.tokens(t)) to context") }
         case .compact:
@@ -1335,7 +1338,7 @@ private struct EventRow: View {
             let ctx = e.contextTokens.map { "ctx \(Format.tokens($0))" } ?? ""
             let out = e.usage.map { "out \(Format.tokens($0.outputTokens))" } ?? ""
             return [ctx, out].filter { !$0.isEmpty }.joined(separator: " · ")
-        case .tool, .prompt, .compact:
+        case .tool, .prompt, .compact, .report:
             return e.addedTokens.map { "+\(Format.tokens($0)) ctx" } ?? ""
         case .error:
             return ""

@@ -99,7 +99,7 @@ enum Command {
         json: bool,
     },
     /// The costliest calls behind one cause of a session: a tool (`Bash`), a
-    /// program (`sed`), `prompts`, `tasks`, `compaction` or `other`.
+    /// program (`sed`), `prompts`, `tasks`, `reports`, `compaction` or `other`.
     Cause {
         id: String,
         name: String,
@@ -366,7 +366,7 @@ fn run(cli: Cli) -> Result<()> {
             anyhow::ensure!(calls > 0, "lane {lane} has no model calls with token counts");
             let n = call.unwrap_or(calls);
             anyhow::ensure!((1..=calls).contains(&n), "lane {lane} has calls 1 to {calls}");
-            let mut c = ccop_core::context::contents(l, n - 1, each, Some(&s.project_dir)).expect("call is in range");
+            let mut c = ccop_core::context::contents(l, n - 1, each, Some(&s.project_dir), &a.lanes).expect("call is in range");
             let rows = c.rows.len();
             c.rows.truncate(limit);
             if json {

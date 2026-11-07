@@ -470,6 +470,7 @@ extension Cause {
         case .prompt: return ("bubble.left", Theme.prompt, Theme.prompt.opacity(0.12), Theme.prompt)
         case .task: return ("point.3.connected.trianglepath.dotted", Theme.agent, Theme.agent.opacity(0.11), Theme.agent)
         case .compact: return ("arrow.down.right.and.arrow.up.left", Theme.warn, Theme.warn.opacity(0.12), Theme.warn)
+        case .report: return ("arrow.uturn.backward.circle", Theme.agent, Theme.agent.opacity(0.11), Theme.agent)
         case .other: return ("flag", SpendStyle.text2, SpendStyle.neutralTile, SpendStyle.neutralBar)
         }
     }

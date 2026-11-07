@@ -67,7 +67,8 @@ struct ContextView: View {
                             .frame(width: wide ? Self.asideBasis + free / 1000 : nil)
                             .frame(maxWidth: wide ? nil : .infinity)
                     }
-                    ContextHoldings(sessionID: anatomy.sessionId, dir: session.projectDir, lane: lane, call: index)
+                    ContextHoldings(sessionID: anatomy.sessionId, dir: session.projectDir, lane: lane, call: index,
+                                    names: Dictionary(anatomy.lanes.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }))
                         .frame(maxWidth: 900, alignment: .leading)
                 } else {
                     Text("This session has no model calls with token counts.")
@@ -94,7 +95,7 @@ struct ContextView: View {
             }
             Text("The size is exact. The split into parts is estimated.")
                 .font(.system(size: 12)).foregroundStyle(Ink.text3)
-                .help("The size of the context at each model call is exact: the call's input tokens. The split into parts is estimated: the growth from one call to the next goes first to Claude's previous output, and the rest to the prompts and tool results that came between, by their size in bytes. “Start” is the first call: system prompt, tool definitions, instructions and the first prompt.")
+                .help("The size of the context at each model call is exact: the call's input tokens. The split into parts is estimated: the growth from one call to the next goes first to Claude's previous output, and the rest to the prompts, tool results and subagent reports that came between, by their size in bytes. “Start” is the first call: system prompt, tool definitions, instructions and the first prompt.")
         }
     }
 }
@@ -103,17 +104,19 @@ struct ContextView: View {
 /// the series of its tool family, so the chart has one area per colour.
 enum ContextColors {
     /// Bottom to top of the stack.
-    static let stack = ["Start", "Compacted summary", "Claude output", "Prompts", "Read", "Bash", "Edit", "Other tools", "Other"]
+    static let stack = ["Start", "Compacted summary", "Claude output", "Prompts", "Subagent reports", "Read", "Bash", "Edit", "Other tools", "Other"]
 
     static let start = Theme.dynamic(0xB4B4BA, 0x6C6C72)
     static let summary = Theme.dynamic(0x57575C, 0xA1A1A8)
     static let output = Theme.dynamic(0x8B5CF6, 0xA78BFA)
     static let prompts = Theme.dynamic(0x22A35A, 0x3CCB7F)
+    /// The reports background subagents send back (`context.rs`: `REPORTS`).
+    static let reports = Theme.dynamic(0xEA580C, 0xFB923C)
     static let read = Theme.dynamic(0xD9A21B, 0xE8B83A)
     static let bash = Theme.dynamic(0x14A89A, 0x2DD4BF)
     static let edit = Theme.dynamic(0xE0559A, 0xF472B6)
     static let otherTools = Theme.dynamic(0x6D67E8, 0x8D88F2)
-    /// Growth with no prompt or tool result before it (`context.rs`: `Other`).
+    /// Growth with no prompt, tool result or report before it (`context.rs`: `Other`).
     static let other = Theme.dynamic(0xA8A29E, 0x78716C)
 
     /// The series of a part, as `context.rs` names parts.
@@ -133,6 +136,7 @@ enum ContextColors {
         case "Compacted summary": summary
         case "Claude output": output
         case "Prompts": prompts
+        case "Subagent reports": reports
         case "Read": read
         case "Bash": bash
         case "Edit": edit
@@ -528,6 +532,8 @@ struct ContextHoldings: View {
     let lane: AnatomyLane
     /// An index into `lane.context`.
     let call: Int
+    /// Lane id → name, to name a subagent's report.
+    let names: [String: String]
     @State private var each = false
     @State private var showAll = false
     /// The most rows a call of this lane has, so the list keeps its height
@@ -538,7 +544,7 @@ struct ContextHoldings: View {
     private static let limit = 15
 
     var body: some View {
-        let rows = ContextContents.rows(lane, call: call, each: each, dir: dir)
+        let rows = ContextContents.rows(lane, call: call, each: each, dir: dir, names: names)
         let total = lane.context.indices.contains(call) ? lane.context[call].total : 0
         let shown = showAll ? rows : Array(rows.prefix(Self.limit))
         let reserved = showAll ? 0 : max(min(most ?? 0, Self.limit) - shown.count, 0)
@@ -556,7 +562,7 @@ struct ContextHoldings: View {
                 .fixedSize()
                 .help("By file and command: the reads of one file are one row, and Claude's answers are one row. Each addition: every prompt, tool result and answer on its own.")
             }
-            Text("Tokens of this call's context. Each row is estimated; together they make the exact size. Start is the system prompt, the tools, CLAUDE.md and the first prompt. Other is text that came with no prompt or tool call before it.")
+            Text("Tokens of this call's context. Each row is estimated; together they make the exact size. Start is the system prompt, the tools, CLAUDE.md and the first prompt. Subagent reports are what background subagents sent back. Other is text that came with no prompt, tool result or report before it.")
                 .font(.system(size: 12)).foregroundStyle(Ink.text3)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 0) {
@@ -584,7 +590,7 @@ struct ContextHoldings: View {
             }
         }
         .task(id: "\(lane.id) \(each)") {
-            most = ContextContents.mostRows(lane, each: each, dir: dir)
+            most = ContextContents.mostRows(lane, each: each, dir: dir, names: names)
         }
         .sheet(item: $shownCall) { ref in
             if lane.events.indices.contains(ref.index) {
@@ -693,7 +699,12 @@ private struct HoldingRow: View {
     private var help: String {
         var lines = [row.label]
         if row.events.count > 1 {
-            lines.append(row.part == "Claude output" ? "\(row.events.count) answers" : "In the context \(row.events.count) times")
+            let what = switch row.part {
+            case "Claude output": "\(row.events.count) answers"
+            case "Subagent reports": "\(row.events.count) reports"
+            default: "In the context \(row.events.count) times"
+            }
+            lines.append(what)
         }
         if action != nil { lines.append("Click to see the largest one") }
         return lines.joined(separator: "\n")
@@ -781,6 +792,7 @@ struct Contributors: View {
         case .compact: ContextColors.summary
         case .answer: ContextColors.output
         case .error: Theme.bad
+        case .report: ContextColors.reports
         }
     }
 

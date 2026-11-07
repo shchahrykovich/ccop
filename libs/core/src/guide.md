@@ -19,7 +19,7 @@ Go from the general to the particular. Stop when you can answer.
 2. `ccop brief ID`: cost, main causes, commands, subagents, turns, tips. About 2 KB.
 3. `ccop brief --since 7d --project NAME`: the same for many sessions.
 4. `ccop top WHAT`: a longer list. `WHAT` is `commands`, `causes`, `agents`, `sessions`, `turns`, `errors`, `projects` or `tips`. Add `--session ID`, or `--since 7d --project NAME`. Add `--by time` for the slowest, and `--limit 20`.
-5. `ccop cause ID NAME --limit 20`: the costliest calls of a tool (`Bash`), a program (`sed`), `prompts`, `tasks`, `compaction` or `other`. Add `--by time` for the slowest.
+5. `ccop cause ID NAME --limit 20`: the costliest calls of a tool (`Bash`), a program (`sed`), `prompts`, `tasks`, `reports` (of subagents), `compaction` or `other`. Add `--by time` for the slowest.
 6. `ccop time ID`: where the clock went: model, tools, subagents, waiting. The slowest calls and turns.
 7. `ccop context ID --call N`: what fills one call's context: files, commands, answers. The last call if no `--call`.
 8. `ccop call ID TOOL_USE_ID --max-bytes 4000`: one call, cut at that size.

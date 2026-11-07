@@ -21,8 +21,9 @@ public enum ContextContents {
     /// The rows of call `call` (an index into `lane.context`), largest first.
     /// Grouped: one row per file, command or prompt, and one for all of
     /// Claude's answers. With `each`: one row per item. A path in the project
-    /// folder `dir` is shown from that folder.
-    public static func rows(_ lane: AnatomyLane, call: Int, each: Bool, dir: String?) -> [ContextRow] {
+    /// folder `dir` is shown from that folder. A subagent's report is named
+    /// by its lane's name in `names` (lane id → name).
+    public static func rows(_ lane: AnatomyLane, call: Int, each: Bool, dir: String?, names: [String: String] = [:]) -> [ContextRow] {
         let items = lane.contextItems
             .filter { $0.firstCall <= call && call <= $0.lastCall }
             .enumerated()
@@ -36,6 +37,10 @@ public enum ContextContents {
             let label: String
             switch event {
             case let e? where e.kind == .answer && !each: label = item.part
+            case let e? where e.kind == .report:
+                let from = e.agentId ?? "another agent"
+                let name = names[from] ?? "from \(from)"
+                label = each ? e.text.map { oneLine("\(name): \($0)") } ?? name : name
             case let e?: label = e.text.map { text in oneLine(dir.map { inFolder(text, $0) } ?? text) } ?? item.part
             case nil: label = item.part
             }
@@ -55,8 +60,23 @@ public enum ContextContents {
 
     /// The most rows any call of the lane has, so a list can keep its height
     /// while the pointer moves from call to call.
-    public static func mostRows(_ lane: AnatomyLane, each: Bool, dir: String?) -> Int {
-        lane.context.indices.map { rows(lane, call: $0, each: each, dir: dir).count }.max() ?? 0
+    public static func mostRows(_ lane: AnatomyLane, each: Bool, dir: String?, names: [String: String] = [:]) -> Int {
+        lane.context.indices.map { rows(lane, call: $0, each: each, dir: dir, names: names).count }.max() ?? 0
+    }
+
+    /// The text of an `<agent-message from="ID">` (a background subagent's
+    /// report) without its frame: what comes after "The report follows:",
+    /// each line without the two spaces the frame puts before it. The text
+    /// as it is when it is not such a message. As `agent_message` in anatomy.rs.
+    public static func reportBody(_ text: String) -> String {
+        guard let open = text.range(of: "<agent-message from=\""),
+              let close = text[open.upperBound...].firstIndex(of: ">") else { return text }
+        var body = text[text.index(after: close)...]
+        if let end = body.range(of: "</agent-message>") { body = body[..<end.lowerBound] }
+        if let r = body.range(of: "The report follows:") { body = body[r.upperBound...] }
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.hasPrefix("  ") ? $0.dropFirst(2) : $0 }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// `path` from the folder `dir`, when it is in it: `/p/x/a.md` in `/p` →

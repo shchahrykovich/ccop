@@ -41,6 +41,11 @@ fn the_anatomy_example_is_what_the_code_makes() {
             "content": [{"type": "tool_use", "id": "t3", "name": "Bash", "input": {"command": "git push", "description": "Push"}}],
             "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2500, "cache_read_input_tokens": 20000, "output_tokens": 30}}}),
         json!({"type": "user", "timestamp": "2026-11-02T10:03:09Z", "message": {"content": [{"type": "tool_result", "tool_use_id": "t3", "content": "rejected", "is_error": true}]}}),
+        json!({"type": "user", "isMeta": true, "timestamp": "2026-11-02T10:03:20Z", "message": {"content":
+            "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] The report follows:\n  The topic needs two sections.\n</agent-message>"}}),
+        json!({"type": "assistant", "requestId": "r4", "timestamp": "2026-11-02T10:03:25Z", "message": {"id": "m4", "model": "claude-opus-5-5",
+            "content": [{"type": "text", "text": "Noted."}],
+            "usage": {"input_tokens": 1, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 22501, "output_tokens": 10}}}),
     ];
     let sub_lines = [
         json!({"type": "user", "isSidechain": true, "timestamp": "2026-11-02T10:00:06Z", "message": {"content": "Research the topic"}}),

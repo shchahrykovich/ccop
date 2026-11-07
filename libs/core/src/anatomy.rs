@@ -138,6 +138,9 @@ pub enum EventKind {
     Tool,
     Compact,
     Error,
+    /// A message from another agent: the report of a background subagent,
+    /// or a `SendMessage` from another session. `agent_id` is the sender.
+    Report,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -579,6 +582,24 @@ impl LaneReader {
             }
             return;
         }
+        // A background subagent's report, or a message from another session.
+        let whole = match content {
+            Value::String(s) => s.clone(),
+            Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n"),
+            _ => String::new(),
+        };
+        if let Some((from, body)) = agent_message(&whole) {
+            let i = self.push(EventKind::Report, at, at);
+            let e = &mut self.lane.events[i];
+            e.agent_id = Some(from);
+            e.text = Some(clip(&body, crate::transcript::PROMPT_CHARS)).filter(|t| !t.is_empty());
+            e.result_bytes = Some(whole.len() as u64);
+            if let Some(c) = self.chat_entry(i) {
+                c.text = Some(whole);
+            }
+            self.last = Some(self.last.map_or(at, |l| l.max(at)));
+            return;
+        }
         // Not a prompt, but the next model call goes out after it: a subagent's
         // hand-back can come long after the last answer.
         let waited = self.last.map_or(at, |l| l.max(at));
@@ -857,6 +878,21 @@ fn turns(lanes: &[Lane]) -> Vec<Turn> {
         }
     }
     out
+}
+
+/// The sender and the text of an `<agent-message from="ID">` in a user
+/// record: how a background subagent's report comes back (checked
+/// 2026-11-07; not a stable format). A report starts with a frame that ends
+/// in "The report follows:"; the text is what comes after it.
+pub fn agent_message(text: &str) -> Option<(String, String)> {
+    const OPEN: &str = "<agent-message from=\"";
+    let start = text.find(OPEN)? + OPEN.len();
+    let rest = &text[start..];
+    let from = &rest[..rest.find('"')?];
+    let body = &rest[rest.find('>')? + 1..];
+    let body = body.split("</agent-message>").next().unwrap_or(body);
+    let body = body.split_once("The report follows:").map_or(body, |(_, r)| r);
+    Some((from.to_string(), body.trim().to_string()))
 }
 
 /// A short form of a tool's input: the command, file, pattern or query.

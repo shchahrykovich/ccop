@@ -107,6 +107,9 @@ pub enum CauseKind {
     Task,
     Tool,
     Compact,
+    /// The report of a background subagent, or a message from another
+    /// session (`EventKind::Report`).
+    Report,
     /// A model call with nothing before it in its lane.
     Other,
 }
@@ -114,7 +117,7 @@ pub enum CauseKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cause {
     pub kind: CauseKind,
-    /// The tool's name, or `Your prompts`, `Tasks from the lead`, `Compaction`, `Other`.
+    /// The tool's name, or `Your prompts`, `Tasks from the lead`, `Compaction`, `Subagent reports`, `Other`.
     pub name: String,
     /// Tool calls, prompts or compactions.
     pub count: u64,
@@ -238,6 +241,7 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
                 EventKind::Prompt => (CauseKind::Task, "Tasks from the lead".to_string()),
                 EventKind::Tool => (CauseKind::Tool, e.tool.clone().unwrap_or_else(|| "Tool".into())),
                 EventKind::Compact => (CauseKind::Compact, "Compaction".to_string()),
+                EventKind::Report => (CauseKind::Report, "Subagent reports".to_string()),
                 EventKind::Error => continue,
                 EventKind::Answer => {
                     let Some(u) = e.usage else { continue };

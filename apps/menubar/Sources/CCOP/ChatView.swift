@@ -240,10 +240,12 @@ struct ChatView: View {
                 case .answer:
                     // An answer after a prompt (or at the top) starts Claude's block with
                     // the avatar; the next answers of the same block show only their line.
-                    let starts = previous == nil || previous == .prompt || previous == .compact || previous == .error
+                    let starts = previous == nil || previous == .prompt || previous == .report || previous == .compact || previous == .error
                     answerView(e, texts[i], startsBlock: starts, first: first)
                 case .tool:
                     toolView(lane, i, e, texts[i], first: first)
+                case .report:
+                    reportView(i, e, texts[i], first: first, proxy: proxy)
                 case .compact:
                     marker(e.text ?? "Compacted", first: first)
                 case .error:
@@ -303,6 +305,35 @@ struct ChatView: View {
                     Text(line)
                         .font(.system(size: 11)).foregroundStyle(Board.text3).monospacedDigit()
                         .help("Tokens this prompt added to the context (estimated); every later call of this lane reads them again. The cost is its part of the model call after it.")
+                }
+            }
+        }
+    }
+
+    /// A background subagent's report, as the lead read it: under the
+    /// subagent's name, folded as a prompt is.
+    private func reportView(_ i: Int, _ e: AnatomyEvent, _ t: ChatText?, first: Bool, proxy: ScrollViewProxy) -> some View {
+        let color = Theme.agent
+        let time = e.start.formatted(date: .omitted, time: .standard)
+        let from = e.agentId.flatMap { anatomy.lane($0)?.name } ?? e.agentId.map { "from \($0)" } ?? "another agent"
+        let text = t?.text.map(ContextContents.reportBody) ?? e.text ?? ""
+        return row(avatar: Avatar(symbol: Theme.tool("Agent").symbol, color: color, tint: color.opacity(0.12), size: 12, label: "A subagent"),
+                   top: 14, first: first) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Report of \(from) · \(time)")
+                    .font(.system(size: 11)).foregroundStyle(Board.text3).monospacedDigit()
+                FoldedText(text: text, color: color, isOpen: openPrompts.contains(i)) { wasTall in
+                    togglePrompt(i, wasTall: wasTall, proxy: proxy)
+                }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(color.opacity(0.16)))
+                if let line = promptCostLine(e) {
+                    Text(line)
+                        .font(.system(size: 11)).foregroundStyle(Board.text3).monospacedDigit()
+                        .help("Tokens this report added to the context (estimated); every later call of this lane reads them again. The cost is its part of the model call after it.")
                 }
             }
         }

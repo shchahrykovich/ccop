@@ -25,7 +25,7 @@ public struct ChatFilter: Equatable, Sendable {
             case .bash: e.kind == .tool && e.tool == "Bash"
             case .edit: e.kind == .tool && ["Edit", "MultiEdit", "NotebookEdit"].contains(e.tool ?? "")
             case .write: e.kind == .tool && e.tool == "Write"
-            case .agent: e.kind == .tool && ["Agent", "Task"].contains(e.tool ?? "")
+            case .agent: (e.kind == .tool && ["Agent", "Task"].contains(e.tool ?? "")) || e.kind == .report
             }
         }
     }

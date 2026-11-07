@@ -270,7 +270,7 @@ pub fn context(session: &str, c: &Contents, total_rows: usize) -> String {
     for r in &c.rows {
         let times = if r.events.len() > 1 { format!("{}x", r.events.len()) } else { String::new() };
         let part = r.part.strip_prefix("Tool: ").unwrap_or(&r.part);
-        let _ = writeln!(out, "  {:>6}  {:>3.0}%  {:>4}  {:<14}  {}", short(r.tokens), r.tokens as f64 * 100.0 / total, times, cut(part, 14), cut(&r.label, 80));
+        let _ = writeln!(out, "  {:>6}  {:>3.0}%  {:>4}  {:<16}  {}", short(r.tokens), r.tokens as f64 * 100.0 / total, times, cut(part, 16), cut(&r.label, 80));
     }
     if c.rows.len() < total_rows {
         let _ = writeln!(out, "{} more: --limit", total_rows - c.rows.len());

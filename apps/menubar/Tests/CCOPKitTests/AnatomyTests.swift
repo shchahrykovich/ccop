@@ -30,11 +30,18 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertEqual(a.sessionId, "s1")
         XCTAssertEqual(a.lanes.map(\.id), ["main", "a1"])
         let main = a.lanes[0]
-        XCTAssertEqual(main.events.map(\.kind), [.prompt, .answer, .tool, .tool, .answer, .compact, .prompt, .answer, .tool])
+        XCTAssertEqual(main.events.map(\.kind), [.prompt, .answer, .tool, .tool, .answer, .compact, .prompt, .answer, .tool, .report, .answer])
+        // A background subagent's report, and the call it made run.
+        XCTAssertEqual(main.events[9].agentId, "a1")
+        XCTAssertEqual(main.events[9].text, "The topic needs two sections.")
+        XCTAssertEqual(main.events[9].label, "Subagent report")
+        XCTAssertEqual(main.context[3].parts.first { $0.name == "Subagent reports" }?.tokens, main.events[9].addedTokens)
+        XCTAssertEqual(a.spend.causes.first { $0.kind == .report }?.name, "Subagent reports")
+        XCTAssertEqual(a.spend.causes.first { $0.kind == .report }?.title, "Subagent reports")
         XCTAssertEqual(main.events[2].label, "Read")
         XCTAssertEqual(main.events[3].agentId, "a1")
         XCTAssertTrue(main.events[8].isError)
-        XCTAssertEqual(main.context.count, 3)
+        XCTAssertEqual(main.context.count, 4)
         XCTAssertEqual(main.context[1].parts.map(\.name), ["Start", "Claude output", "Tool: Read", "Tool: Agent"])
         XCTAssertEqual(main.context[1].parts.reduce(0) { $0 + $1.tokens }, main.context[1].total)
         XCTAssertEqual(a.lanes[1].parent, "main")
@@ -60,21 +67,24 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertNil(main.events[8].refusal)
         XCTAssertNil(a.spend.errors.first?.refusal)
         XCTAssertEqual(main.events[8].command, "git push")
-        XCTAssertEqual(a.spend.commands.first?.items, [CallCost(lane: "main", event: 8, costMicros: 0)])
+        // The failed push and the report came back before the same call: they share it.
+        XCTAssertEqual(a.spend.commands.first?.items, [CallCost(lane: "main", event: 8, costMicros: 2852)])
         // An answer has its own cost; a prompt pays its part of the call after it.
         XCTAssertEqual(main.events[1].costMicros, 102_412)
         XCTAssertEqual(main.events[0].costMicros, main.events[1].costMicros)
-        XCTAssertNil(main.events[8].costMicros)
+        XCTAssertEqual(main.events[8].costMicros, main.events[9].costMicros)
     }
 
     func testTheNextModelCallAfterAnEvent() throws {
         let main = try Anatomy.decode(Data(contentsOf: Self.example)).lanes[0]
-        // prompt, answer, tool, tool, answer, compact, prompt, answer, tool
+        // prompt, answer, tool, tool, answer, compact, prompt, answer, tool, report, answer
         XCTAssertEqual(main.nextAnswer(after: 0), 1)
         XCTAssertEqual(main.nextAnswer(after: 2), 4)
         XCTAssertEqual(main.nextAnswer(after: 3), 4)
         XCTAssertEqual(main.nextAnswer(after: 5), 7)
-        XCTAssertNil(main.nextAnswer(after: 8))
+        XCTAssertEqual(main.nextAnswer(after: 8), 10)
+        XCTAssertEqual(main.nextAnswer(after: 9), 10)
+        XCTAssertNil(main.nextAnswer(after: 10))
         XCTAssertNil(main.nextAnswer(after: 100))
         XCTAssertEqual(main.maxAnswerCost, 102_412)
         // A prompt or tool has its part of the next call's tokens; an answer has its usage instead.
@@ -85,16 +95,17 @@ final class AnatomyContractTests: XCTestCase {
 
     func testTheCallsThatReadAnEventsTokens() throws {
         let main = try Anatomy.decode(Data(contentsOf: Self.example)).lanes[0]
-        // prompt, answer, tool, tool, answer, compact, prompt, answer, tool;
-        // one context point per answer: events 1, 4, 7.
-        XCTAssertEqual(main.context.map(\.event), [1, 4, 7])
+        // prompt, answer, tool, tool, answer, compact, prompt, answer, tool, report, answer;
+        // one context point per answer: events 1, 4, 7, 10.
+        XCTAssertEqual(main.context.map(\.event), [1, 4, 7, 10])
         // The first prompt is read by the calls before the compaction.
         XCTAssertEqual(main.readingCalls(after: 0), 0 ..< 2)
         XCTAssertEqual(main.readingCalls(after: 3), 1 ..< 2)
-        // After the compaction only the call after it reads the new prompt.
-        XCTAssertEqual(main.readingCalls(after: 6), 2 ..< 3)
-        // No call after the last tool result.
-        XCTAssertNil(main.readingCalls(after: 8))
+        // After the compaction the calls after it read the new prompt.
+        XCTAssertEqual(main.readingCalls(after: 6), 2 ..< 4)
+        XCTAssertEqual(main.readingCalls(after: 8), 3 ..< 4)
+        // No call after the last answer.
+        XCTAssertNil(main.readingCalls(after: 10))
     }
 
     func testChatAndCallDecode() throws {
@@ -140,8 +151,8 @@ final class AnatomyContractTests: XCTestCase {
     func testTurnEventsAndTreeOrder() throws {
         let a = try Anatomy.decode(Data(contentsOf: Self.example))
         XCTAssertEqual(a.mainEvents(in: a.turns[0]).map(\.kind), [.prompt, .answer, .tool, .tool, .answer, .compact])
-        XCTAssertEqual(a.mainEvents(in: a.turns[1]).map(\.kind), [.prompt, .answer, .tool])
-        XCTAssertEqual(a.mainEventIndices(in: a.turns[1]), [6, 7, 8])
+        XCTAssertEqual(a.mainEvents(in: a.turns[1]).map(\.kind), [.prompt, .answer, .tool, .report, .answer])
+        XCTAssertEqual(a.mainEventIndices(in: a.turns[1]), [6, 7, 8, 9, 10])
         XCTAssertEqual(a.lanesInTreeOrder.map(\.id), ["main", "a1"])
         XCTAssertEqual(a.depth(of: a.lanes[1]), 1)
         XCTAssertEqual(a.depth(of: a.lanes[0]), 0)

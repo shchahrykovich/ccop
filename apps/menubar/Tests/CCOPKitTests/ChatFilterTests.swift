@@ -20,6 +20,12 @@ final class ChatFilterTests: XCTestCase {
         XCTAssertEqual(f.indices(events), Array(0..<12))
     }
 
+    func testAgentShowsTheCallsAndTheReportsOfSubagents() {
+        let withReport = events + [ev(.report, cost: 90)]
+        XCTAssertEqual(ChatFilter(kinds: [.agent]).indices(withReport), [8, 9, 12])
+        XCTAssertEqual(ChatFilter(kinds: [.user]).indices(withReport), [0])
+    }
+
     func testKindsAreJoinedWithOr() {
         XCTAssertEqual(ChatFilter(kinds: [.bash]).indices(events), [2])
         XCTAssertEqual(ChatFilter(kinds: [.edit]).indices(events), [3, 5])

@@ -53,6 +53,7 @@ public extension Cause {
         case .prompt: "Your messages"
         case .task: "Subagent tasks"
         case .compact: "Compaction"
+        case .report: "Subagent reports"
         case .other: "Start"
         }
     }
@@ -79,6 +80,7 @@ public extension Spend {
         case .prompt: "Model calls right after one of your messages."
         case .task: "The first call of a subagent, after the task its lead gave it."
         case .compact: "Model calls right after a compaction."
+        case .report: "Model calls right after a background subagent sent back its report."
         case .other: "Model calls with nothing new before them in their lane: the start, with the system prompt."
         case .tool:
             c.errorCostMicros > 0

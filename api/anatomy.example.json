@@ -1,7 +1,7 @@
 {
   "session_id": "s1",
   "started_at": "2026-11-02T10:00:00Z",
-  "ended_at": "2026-11-02T10:03:09Z",
+  "ended_at": "2026-11-02T10:03:25Z",
   "lanes": [
     {
       "id": "main",
@@ -11,14 +11,14 @@
       "agent_type": null,
       "model": "claude-opus-5-5",
       "started_at": "2026-11-02T10:00:00Z",
-      "ended_at": "2026-11-02T10:03:09Z",
+      "ended_at": "2026-11-02T10:03:25Z",
       "usage": {
-        "input_tokens": 5,
-        "cache_write_tokens": 24200,
+        "input_tokens": 6,
+        "cache_write_tokens": 24400,
         "cache_write_1h_tokens": 0,
-        "cache_read_tokens": 40003,
-        "output_tokens": 190,
-        "requests": 3
+        "cache_read_tokens": 62504,
+        "output_tokens": 200,
+        "requests": 4
       },
       "tool_calls": 3,
       "errors": 1,
@@ -248,12 +248,65 @@
           "result_bytes": 8,
           "agent_id": null,
           "context_tokens": null,
-          "added_tokens": null,
+          "added_tokens": 8,
           "group": "git push",
           "error": "rejected",
           "refusal": null,
           "command": "git push",
-          "cost_micros": null,
+          "cost_micros": 2852,
+          "paid_tokens": 11356,
+          "trigger": null,
+          "after_tokens": null
+        },
+        {
+          "kind": "report",
+          "start": "2026-11-02T10:03:20Z",
+          "end": "2026-11-02T10:03:20Z",
+          "text": "The topic needs two sections.",
+          "model": null,
+          "usage": null,
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": 154,
+          "agent_id": "a1",
+          "context_tokens": null,
+          "added_tokens": 163,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 2852,
+          "paid_tokens": 11356,
+          "trigger": null,
+          "after_tokens": null
+        },
+        {
+          "kind": "answer",
+          "start": "2026-11-02T10:03:20Z",
+          "end": "2026-11-02T10:03:25Z",
+          "text": "Noted.",
+          "model": "claude-opus-5-5",
+          "usage": {
+            "input_tokens": 1,
+            "cache_write_tokens": 200,
+            "cache_write_1h_tokens": 0,
+            "cache_read_tokens": 22501,
+            "output_tokens": 10,
+            "requests": 1
+          },
+          "tool": null,
+          "tool_use_id": null,
+          "is_error": false,
+          "result_bytes": null,
+          "agent_id": null,
+          "context_tokens": 22702,
+          "added_tokens": null,
+          "group": null,
+          "error": null,
+          "refusal": null,
+          "command": null,
+          "cost_micros": 5704,
           "paid_tokens": null,
           "trigger": null,
           "after_tokens": null
@@ -308,6 +361,33 @@
               "tokens": 2498
             }
           ]
+        },
+        {
+          "at": "2026-11-02T10:03:25Z",
+          "event": 10,
+          "total": 22702,
+          "parts": [
+            {
+              "name": "Start",
+              "tokens": 20003
+            },
+            {
+              "name": "Compacted summary",
+              "tokens": 2498
+            },
+            {
+              "name": "Claude output",
+              "tokens": 30
+            },
+            {
+              "name": "Tool: Bash",
+              "tokens": 8
+            },
+            {
+              "name": "Subagent reports",
+              "tokens": 163
+            }
+          ]
         }
       ],
       "context_items": [
@@ -343,15 +423,36 @@
           "event": null,
           "part": "Start",
           "first_call": 2,
-          "last_call": 2,
+          "last_call": 3,
           "tokens": 20003
         },
         {
           "event": 5,
           "part": "Compacted summary",
           "first_call": 2,
-          "last_call": 2,
+          "last_call": 3,
           "tokens": 2498
+        },
+        {
+          "event": 7,
+          "part": "Claude output",
+          "first_call": 3,
+          "last_call": 3,
+          "tokens": 30
+        },
+        {
+          "event": 8,
+          "part": "Tool: Bash",
+          "first_call": 3,
+          "last_call": 3,
+          "tokens": 8
+        },
+        {
+          "event": 9,
+          "part": "Subagent reports",
+          "first_call": 3,
+          "last_call": 3,
+          "tokens": 163
         }
       ]
     },
@@ -572,15 +673,15 @@
     {
       "index": 2,
       "start": "2026-11-02T10:03:00Z",
-      "end": "2026-11-02T10:03:09Z",
+      "end": "2026-11-02T10:03:25Z",
       "prompt": "push",
       "usage": {
-        "input_tokens": 1,
-        "cache_write_tokens": 2500,
+        "input_tokens": 2,
+        "cache_write_tokens": 2700,
         "cache_write_1h_tokens": 0,
-        "cache_read_tokens": 20000,
-        "output_tokens": 30,
-        "requests": 1
+        "cache_read_tokens": 42501,
+        "output_tokens": 40,
+        "requests": 2
       },
       "subagent_usage": {
         "input_tokens": 0,
@@ -590,9 +691,9 @@
         "output_tokens": 0,
         "requests": 0
       },
-      "cost_micros": 17104,
+      "cost_micros": 22808,
       "subagent_cost_micros": 0,
-      "answers": 1,
+      "answers": 2,
       "tool_calls": 1,
       "subagents": []
     }
@@ -640,13 +741,23 @@
     },
     {
       "lane": "main",
+      "event": 9,
+      "tokens": 163
+    },
+    {
+      "lane": "main",
+      "event": 8,
+      "tokens": 8
+    },
+    {
+      "lane": "main",
       "event": 3,
       "tokens": 3
     }
   ],
   "spend": {
-    "cost_micros": 158627,
-    "tokens": 82778,
+    "cost_micros": 164331,
+    "tokens": 105490,
     "causes": [
       {
         "kind": "prompt",
@@ -760,6 +871,48 @@
       },
       {
         "kind": "tool",
+        "name": "Bash",
+        "count": 1,
+        "errors": 1,
+        "model_calls": 0.5,
+        "cost_micros": 2852,
+        "tokens": 11356,
+        "error_cost_micros": 2852,
+        "avg_context": 22702,
+        "added_tokens": 8,
+        "description": null,
+        "server_description": null,
+        "items": [
+          {
+            "lane": "main",
+            "event": 8,
+            "cost_micros": 2852
+          }
+        ]
+      },
+      {
+        "kind": "report",
+        "name": "Subagent reports",
+        "count": 1,
+        "errors": 0,
+        "model_calls": 0.5,
+        "cost_micros": 2852,
+        "tokens": 11356,
+        "error_cost_micros": 0,
+        "avg_context": 22702,
+        "added_tokens": 163,
+        "description": null,
+        "server_description": null,
+        "items": [
+          {
+            "lane": "main",
+            "event": 9,
+            "cost_micros": 2852
+          }
+        ]
+      },
+      {
+        "kind": "tool",
         "name": "WebSearch",
         "count": 1,
         "errors": 0,
@@ -778,38 +931,17 @@
             "cost_micros": 2802
           }
         ]
-      },
-      {
-        "kind": "tool",
-        "name": "Bash",
-        "count": 1,
-        "errors": 1,
-        "model_calls": 0.0,
-        "cost_micros": 0,
-        "tokens": 0,
-        "error_cost_micros": 0,
-        "avg_context": 0,
-        "added_tokens": 0,
-        "description": null,
-        "server_description": null,
-        "items": [
-          {
-            "lane": "main",
-            "event": 8,
-            "cost_micros": 0
-          }
-        ]
       }
     ],
     "lanes": [
       {
         "lane": "main",
-        "cost_micros": 132821,
-        "model_calls": 3,
-        "avg_context": 21402,
-        "max_context": 22501,
+        "cost_micros": 138525,
+        "model_calls": 4,
+        "avg_context": 21727,
+        "max_context": 22702,
         "start_context": 20003,
-        "sonnet_cost_micros": 70411
+        "sonnet_cost_micros": 75513
       },
       {
         "lane": "a1",
@@ -827,14 +959,14 @@
         "group": "git push",
         "calls": 1,
         "errors": 1,
-        "cost_micros": 0,
+        "cost_micros": 2852,
         "result_bytes": 8,
         "example": "Push",
         "items": [
           {
             "lane": "main",
             "event": 8,
-            "cost_micros": 0
+            "cost_micros": 2852
           }
         ]
       }
@@ -844,7 +976,7 @@
         "tool": "Bash",
         "message": "rejected",
         "count": 1,
-        "cost_micros": 0,
+        "cost_micros": 2852,
         "example": "Push",
         "cause": null,
         "refusal": null
