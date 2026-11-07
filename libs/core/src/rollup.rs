@@ -194,6 +194,7 @@ fn tip_kind_name(kind: TipKind) -> &'static str {
         TipKind::BigContext => "Agents that read a large context on every call",
         TipKind::BigResults => "Large tool results that stay in the context",
         TipKind::CacheRewrites => "Cache rewrites: a large context written to the cache again",
+        TipKind::LateCompaction => "Late compaction: an earlier auto-compact window would cost less",
     }
 }
 

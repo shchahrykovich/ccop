@@ -153,6 +153,11 @@ pub struct Event {
     /// after it (input, cache write, cache read and output), split as
     /// `cost_micros` is. None for an answer: its tokens are in `usage`.
     pub paid_tokens: Option<u64>,
+    /// Compact: `auto` or `manual`, as the transcript says it.
+    pub trigger: Option<String>,
+    /// Compact: the size Claude Code gives for the context after it. The next
+    /// call reads more: this does not count the system prompt and the tools.
+    pub after_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -370,6 +375,8 @@ impl LaneReader {
             command: None,
             cost_micros: None,
             paid_tokens: None,
+            trigger: None,
+            after_tokens: None,
         });
         self.lane.events.len() - 1
     }
@@ -549,6 +556,8 @@ impl LaneReader {
                 let after = post.map(|p| format!(" → {}", crate::usage::short(p))).unwrap_or_default();
                 self.lane.events[i].text = Some(format!("Compacted ({trigger}): {}{after} tokens", crate::usage::short(pre)));
                 self.lane.events[i].usage = Some(Usage { input_tokens: pre, ..Usage::default() });
+                self.lane.events[i].trigger = meta.get("trigger").and_then(Value::as_str).map(str::to_string);
+                self.lane.events[i].after_tokens = post;
                 self.last = Some(at);
             }
             Some("api_error") => {
@@ -1038,6 +1047,7 @@ mod tests {
         assert_eq!((m.events[5].is_error, m.errors, m.tool_calls), (true, 1, 3));
         assert_eq!(m.events[8].text.as_deref(), Some("Compacted (auto): 486K → 26K tokens"));
         assert_eq!(m.events[8].start, at("05:30"));
+        assert_eq!((m.events[8].trigger.as_deref(), m.events[8].after_tokens), (Some("auto"), Some(26461)));
 
         // The subagent is linked to the Agent call by the result's agentId.
         let s = &a.lanes[1];

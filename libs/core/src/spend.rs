@@ -23,6 +23,17 @@ pub const BIG_RESULT: u64 = 10_000;
 /// A tool needs this many calls for the "fewer calls" tip.
 pub const MANY_CALLS: u64 = 10;
 const SONNET: &str = "claude-sonnet-5-5";
+/// The auto-compact windows the late-compaction tip tries. The largest comes
+/// first: when two save the same, the tip names the one that compacts less.
+const COMPACT_WINDOWS: [u64; 3] = [400_000, 300_000, 200_000];
+/// What a compaction keeps of the history, on top of the agent's start context.
+/// In 100 compactions (2026-11-07) `postTokens` had a median of 27K and a 90th
+/// percentile of 40K.
+const COMPACT_KEPT: u64 = 30_000;
+/// The output of the call that writes a summary. That call is not in the
+/// transcript. The 90th percentile of 83 summaries (2026-11-07), at 4 characters
+/// per token.
+const SUMMARY_OUTPUT: u64 = 5_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Spend {
@@ -148,6 +159,7 @@ pub enum TipKind {
     BigContext,
     BigResults,
     CacheRewrites,
+    LateCompaction,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,6 +300,7 @@ pub fn analyze_with_paid(lanes: &[Lane]) -> (Spend, BTreeMap<(usize, usize), Pai
         tips.extend(big_context(lanes, &lane_spends, cost_micros));
         tips.extend(big_results(lanes, cost_micros));
         tips.extend(cache_rewrites(lanes, cost_micros));
+        tips.extend(late_compaction(lanes, &lane_spends, cost_micros));
     }
     tips.sort_by_key(|t| std::cmp::Reverse(t.saving_micros.unwrap_or(t.cost_micros)));
     (Spend { cost_micros, tokens, causes, lanes: lane_spends, tips, commands, errors }, paid)
@@ -573,11 +586,115 @@ fn big_context(lanes: &[Lane], spends: &[LaneSpend], total: u64) -> Option<Tip> 
             dollars(cost)
         ),
         detail: format!(
-            "{list}. Every call reads the whole context again. Give an agent a smaller task, start a new agent for each \
-             part of the work, or compact earlier."
+            "{list}. Every call reads the whole context again. Give an agent a smaller task, or start a new agent for each \
+             part of the work."
         ),
         cost_micros: cost,
         saving_micros: None,
+    })
+}
+
+/// One lane played again with an earlier auto-compact window, in µ$.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct Replay {
+    /// What later calls would not read from the cache.
+    saved: f64,
+    /// The summary calls and the new cache writes of the extra compactions.
+    paid: f64,
+    compactions: u64,
+}
+
+impl Replay {
+    fn net(&self) -> f64 {
+        self.saved - self.paid
+    }
+}
+
+/// Plays a lane again: when a call's context would pass `window`, the lane
+/// compacts. That costs a summary call (it reads the context and writes a
+/// summary) and a cache write of the short context, which would otherwise be a
+/// cache read. Every later call then reads less, until a real compaction makes
+/// both histories start again. A lane that cannot get under the window (a fork
+/// starts with its parent's history) is left as it is.
+///
+/// It leaves out two things: a call with a cache miss would also write less, so
+/// it saves more than this; the model may read files again after a compaction,
+/// so it may save less. Only the second is a risk, and the tip says so.
+fn replay(lane: &Lane, start_context: u64, window: u64) -> Replay {
+    let mut out = Replay::default();
+    let short_context = start_context + COMPACT_KEPT;
+    if short_context >= window {
+        return out;
+    }
+    let one_hour = lane.events.iter().any(|e| e.usage.is_some_and(|u| u.cache_write_1h_tokens > 0));
+    let mut removed = 0;
+    for e in &lane.events {
+        match (e.kind, e.usage) {
+            (EventKind::Compact, _) => removed = 0,
+            (EventKind::Answer, Some(_)) => {
+                let actual = context_of(e);
+                let p = price(e.model.as_deref().unwrap_or_default(), actual);
+                let context = actual.saturating_sub(removed);
+                if context > window {
+                    let write = if one_hour { p.cache_write_1h } else { p.cache_write_5m };
+                    out.paid += context as f64 * p.cache_read + SUMMARY_OUTPUT as f64 * p.output;
+                    out.paid += short_context as f64 * (write - p.cache_read);
+                    out.compactions += 1;
+                    removed = actual - short_context;
+                }
+                out.saved += removed.min(actual) as f64 * p.cache_read;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Long agents that compact late: every call reads a large context again. An
+/// agent that stops soon after the window loses money, so the replay decides.
+fn late_compaction(lanes: &[Lane], spends: &[LaneSpend], total: u64) -> Option<Tip> {
+    let mut best: Option<(u64, Vec<Replay>)> = None;
+    for window in COMPACT_WINDOWS {
+        let replays: Vec<Replay> = lanes.iter().zip(spends).map(|(l, s)| replay(l, s.start_context, window)).collect();
+        let net = |r: &[Replay]| r.iter().map(Replay::net).sum::<f64>();
+        if best.as_ref().is_none_or(|(_, b)| net(&replays) > net(b)) {
+            best = Some((window, replays));
+        }
+    }
+    let (window, replays) = best?;
+    let net = replays.iter().map(Replay::net).sum::<f64>().round().max(0.0) as u64;
+    // An estimate with a risk, so it must save as much as the model tip asks for.
+    if net == 0 || net * 20 < total {
+        return None;
+    }
+    let saved = replays.iter().map(|r| r.saved).sum::<f64>().round() as u64;
+    let largest = spends.iter().map(|s| s.max_context).max().unwrap_or(0);
+    let mut picked: Vec<(&Lane, &Replay)> = lanes.iter().zip(&replays).filter(|(_, r)| r.compactions > 0 && r.net() > 0.0).collect();
+    picked.sort_by(|a, b| b.1.net().total_cmp(&a.1.net()));
+    let list = picked
+        .iter()
+        .take(3)
+        .map(|(l, r)| {
+            format!("{} saves {} with {} compaction{}", l.name, dollars(r.net().round() as u64), r.compactions, if r.compactions == 1 { "" } else { "s" })
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let subagent = if picked.iter().any(|(l, _)| l.id != "main") {
+        format!(" For one subagent, set `autoCompactWindow: {window}` in its definition.")
+    } else {
+        String::new()
+    };
+    Some(Tip {
+        kind: TipKind::LateCompaction,
+        title: format!("Compacting at {} would save about {}; calls read up to {} of context", short(window), dollars(net), short(largest)),
+        detail: format!(
+            "{list}. ccop played the session again: each extra compaction costs a summary call and a new cache write, and \
+             every later call reads less. Run `/autocompact {}` to set this for the current model.{subagent} The estimate does not \
+             count files the model must read again after a compaction, so try it on one long session first.",
+            short(window).to_lowercase()
+        ),
+        cost_micros: saved,
+        saving_micros: Some(net),
     })
 }
 
@@ -906,6 +1023,108 @@ mod tests {
 
     // Opus 5.5 per token in µ$: input 4, output 20, 1-hour write 8, read 0.20.
     // Sonnet 5.5: input 2, output 10, 1-hour write 4, read 0.20.
+
+    /// A main lane whose calls have these contexts (input 1, write 1, the rest read).
+    fn lane_of_contexts(contexts: &[u64]) -> Lane {
+        let lines: Vec<Value> = contexts
+            .iter()
+            .enumerate()
+            .map(|(i, c)| answer(&format!("{:02}:{:02}", i / 60, i % 60), &format!("m{i}"), c - 2, 1, 1, json!([])))
+            .collect();
+        lane(LaneReader::main(), &lines)
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1.0
+    }
+
+    #[test]
+    fn a_replay_pays_for_the_compaction_and_saves_on_each_later_call() {
+        // Start 40K, so a compaction leaves 70K. The call at 250K passes the window of 200K.
+        let l = lane_of_contexts(&[40_000, 250_000, 250_000, 250_000]);
+        let r = replay(&l, 40_000, 200_000);
+        assert_eq!(r.compactions, 1);
+        // Removed: 250K - 70K = 180K, at 0.20 for 3 calls.
+        assert!(close(r.saved, 3.0 * 36_000.0), "{}", r.saved);
+        // Summary: 250K read + 5K output. Cache write of 70K at 8 in place of a read at 0.20.
+        assert!(close(r.paid, 50_000.0 + 100_000.0 + 546_000.0), "{}", r.paid);
+    }
+
+    #[test]
+    fn a_replay_compacts_again_when_the_short_context_grows_past_the_window() {
+        let l = lane_of_contexts(&[40_000, 250_000, 300_000, 390_000]);
+        // 250K: 70K left. 300K: 120K. 390K: 210K, past the window again.
+        assert_eq!(replay(&l, 40_000, 200_000).compactions, 2);
+    }
+
+    #[test]
+    fn a_real_compaction_makes_both_histories_start_again() {
+        let compact = json!({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-02T10:00:03Z",
+                             "compactMetadata": {"trigger": "auto", "preTokens": 250000, "postTokens": 30000, "durationMs": 0}});
+        let l = lane(
+            LaneReader::main(),
+            &[answer("00:01", "m1", 39_998, 1, 1, json!([])), answer("00:02", "m2", 249_998, 1, 1, json!([])), compact, answer("00:04", "m3", 69_998, 1, 1, json!([]))],
+        );
+        let r = replay(&l, 40_000, 200_000);
+        assert_eq!(r.compactions, 1);
+        // Only the call at 250K reads less: the one after the real compaction is the same.
+        assert!(close(r.saved, 36_000.0), "{}", r.saved);
+    }
+
+    #[test]
+    fn a_lane_that_starts_above_the_window_is_left_as_it_is() {
+        let l = lane_of_contexts(&[300_000, 400_000]);
+        assert_eq!(replay(&l, 300_000, 200_000), Replay::default());
+    }
+
+    #[test]
+    fn a_long_agent_on_a_large_context_gets_the_tip_with_the_command() {
+        let mut contexts = vec![40_000];
+        contexts.extend([500_000; 60]);
+        let l = lane_of_contexts(&contexts);
+        let s = analyze(&[l]);
+        let tip = s.tips.iter().find(|t| t.kind == TipKind::LateCompaction).expect("a compaction tip");
+        // All three windows compact once at 500K and save the same, so the largest wins.
+        // 60 calls × 430K × 0.20, less the summary (100K read, 100K output) and the write (546K).
+        assert_eq!((tip.cost_micros, tip.saving_micros), (5_160_000, Some(5_160_000 - 746_000)));
+        assert!(tip.title.starts_with("Compacting at 400K would save about $4.41"), "{}", tip.title);
+        assert!(tip.detail.contains("`/autocompact 400k`"), "{}", tip.detail);
+        assert!(tip.detail.starts_with("Main session saves $4.41 with 1 compaction."), "{}", tip.detail);
+        assert!(!tip.detail.contains("autoCompactWindow"), "main only: {}", tip.detail);
+    }
+
+    #[test]
+    fn an_agent_that_ends_soon_after_the_window_gets_no_tip() {
+        // Compacting costs more than the 3 calls after it save.
+        let s = analyze(&[lane_of_contexts(&[40_000, 450_000, 450_000, 450_000])]);
+        assert!(s.tips.iter().all(|t| t.kind != TipKind::LateCompaction), "{:?}", s.tips);
+    }
+
+    #[test]
+    fn the_tip_names_the_window_that_saves_the_most() {
+        // Growing slowly from 40K to 395K: 400K is never passed, and 200K compacts
+        // more often than 300K for less saving per compaction.
+        let contexts: Vec<u64> = (0..400).map(|i| 40_000 + i * 890).collect();
+        let l = lane_of_contexts(&contexts);
+        let spend = lane_spend(&l);
+        let net = |w| replay(&l, spend.start_context, w).net();
+        let s = analyze(std::slice::from_ref(&l));
+        let tip = s.tips.iter().find(|t| t.kind == TipKind::LateCompaction).expect("a compaction tip");
+        let best = if net(200_000) > net(300_000) { "200K" } else { "300K" };
+        assert!(tip.title.starts_with(&format!("Compacting at {best} ")), "{}", tip.title);
+    }
+
+    #[test]
+    fn the_subagent_setting_is_named_only_when_a_subagent_gains() {
+        let mut contexts = vec![40_000];
+        contexts.extend([500_000; 60]);
+        let mut sub = lane_of_contexts(&contexts);
+        sub.id = "a1".into();
+        sub.name = "Helper".into();
+        let s = analyze(&[sub]);
+        let tip = s.tips.iter().find(|t| t.kind == TipKind::LateCompaction).expect("a compaction tip");
+        assert!(tip.detail.contains("`autoCompactWindow: 400000`"), "{}", tip.detail);
+    }
 
     /// `Cause.items` is what the app's Cause tab and `ccop cause` list.
     #[test]

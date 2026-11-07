@@ -27,6 +27,8 @@ final class AnatomyContractTests: XCTestCase {
         XCTAssertEqual(a.tools.map(\.tool), ["Agent", "Bash", "Read", "WebSearch"])
         XCTAssertEqual(a.contributors.first?.lane, "main")
         XCTAssertEqual(a.compactions, 1)
+        XCTAssertEqual(main.events[5].trigger, "auto")
+        XCTAssertNotNil(main.events[5].afterTokens)
         XCTAssertEqual(a.spend.causes.first?.name, "Your prompts")
         XCTAssertEqual(a.spend.causes.first?.kind, .prompt)
         XCTAssertEqual(a.spend.causes.first?.modelCalls, 1.5)
@@ -112,9 +114,9 @@ final class AnatomyContractTests: XCTestCase {
     }
 
     func testTipsDecode() throws {
-        let json = #"[{"kind":"many_calls","title":"t","detail":"d","cost_micros":5,"saving_micros":null},{"kind":"cache_rewrites","title":"t","detail":"d","cost_micros":2,"saving_micros":2}]"#
+        let json = #"[{"kind":"many_calls","title":"t","detail":"d","cost_micros":5,"saving_micros":null},{"kind":"cache_rewrites","title":"t","detail":"d","cost_micros":2,"saving_micros":2},{"kind":"late_compaction","title":"t","detail":"d","cost_micros":3,"saving_micros":1}]"#
         let tips = try Session.makeDecoder().decode([Tip].self, from: Data(json.utf8))
-        XCTAssertEqual(tips.map(\.kind), [.manyCalls, .cacheRewrites])
+        XCTAssertEqual(tips.map(\.kind), [.manyCalls, .cacheRewrites, .lateCompaction])
         XCTAssertNil(tips[0].savingMicros)
         XCTAssertEqual(tips[1].savingMicros, 2)
     }

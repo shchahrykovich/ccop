@@ -63,7 +63,7 @@ public struct Anatomy: Codable, Equatable, Sendable {
     }
 
     public var compactions: Int {
-        lanes.reduce(0) { $0 + $1.events.filter { $0.kind == .compact }.count }
+        lanes.reduce(0) { $0 + $1.compactions }
     }
 }
 
@@ -85,6 +85,10 @@ public struct AnatomyLane: Codable, Equatable, Sendable, Identifiable {
     public var duration: TimeInterval {
         guard let s = startedAt, let e = endedAt else { return 0 }
         return e.timeIntervalSince(s)
+    }
+
+    public var compactions: Int {
+        events.filter { $0.kind == .compact }.count
     }
 
     /// The index of the first model call after event `index`: the call that a
@@ -142,6 +146,11 @@ public struct AnatomyEvent: Codable, Equatable, Sendable {
     /// Prompt, tool or compaction: its part of the tokens of the model call after it
     /// (input, cache write, cache read and output), split as `costMicros` is.
     public var paidTokens: UInt64?
+    /// Compact: `auto` or `manual`.
+    public var trigger: String?
+    /// Compact: the size Claude Code gives for the context after it. The next
+    /// call reads more: this does not count the system prompt and the tools.
+    public var afterTokens: UInt64?
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
 
@@ -390,6 +399,7 @@ public enum TipKind: String, Codable, Sendable {
     case bigContext = "big_context"
     case bigResults = "big_results"
     case cacheRewrites = "cache_rewrites"
+    case lateCompaction = "late_compaction"
 }
 
 public struct Tip: Codable, Equatable, Sendable, Identifiable {

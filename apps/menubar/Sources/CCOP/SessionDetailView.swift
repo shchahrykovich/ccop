@@ -137,6 +137,7 @@ struct SessionDetailView: View {
                     UsageBar(usage: s.usage, legend: false, height: 8)
                     UsageTable(session: s, anatomy: a, compact: false)
                 }
+                if let a, a.compactions > 0 { CompactionTable(anatomy: a) }
                 if let a, a.lanes.count > 1 { SubagentTree(anatomy: a) }
                 // Two columns of at least 300 with a gap of 28, else one.
                 let columns = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
@@ -267,8 +268,7 @@ struct SessionDetailView: View {
 
     private func contextLine(_ a: Anatomy) -> String? {
         guard let c = a.contextSize else { return nil }
-        let n = a.lane("main")?.events.filter { $0.kind == .compact }.count ?? 0
-        return "max \(Format.tokens(c.max)) · \(n) compaction\(n == 1 ? "" : "s")"
+        return "max \(Format.tokens(c.max)) · \(plural(a.compactions, "compaction"))"
     }
 
     private func limitShare(_ s: Session) -> String? {
@@ -465,6 +465,7 @@ struct SubagentTree: View {
                     SortTitle(title: "Time", column: Column.time, sort: $sort).frame(width: widths.time, alignment: .trailing)
                     SortTitle(title: "Tokens", column: Column.tokens, sort: $sort).frame(width: widths.tokens, alignment: .trailing)
                     SortTitle(title: "Tools", column: Column.tools, sort: $sort).frame(width: widths.tools, alignment: .trailing)
+                    SortTitle(title: "Compactions", column: Column.compactions, sort: $sort).frame(width: widths.compactions, alignment: .trailing)
                     SortTitle(title: "Cost", column: Column.cost, sort: $sort).frame(width: widths.cost, alignment: .trailing)
                     if hasLimit {
                         SortTitle(title: "Day limit", column: Column.day, sort: $sort, help: Plan.limitShareHelp)
@@ -499,7 +500,7 @@ struct SubagentTree: View {
 
     private static let buttonSize: CGFloat = 22
 
-    private enum Column { case agent, model, start, time, tokens, tools, cost, day, week }
+    private enum Column { case agent, model, start, time, tokens, tools, compactions, cost, day, week }
 
     private static func ascending(_ column: Column, _ a: AnatomyLane, _ b: AnatomyLane) -> Bool {
         switch column {
@@ -509,6 +510,7 @@ struct SubagentTree: View {
         case .time: a.duration < b.duration
         case .tokens: a.usage.total < b.usage.total
         case .tools: a.toolCalls < b.toolCalls
+        case .compactions: a.compactions < b.compactions
         // A session's limits are shares of the cost.
         case .cost, .day, .week: a.costMicros < b.costMicros
         }
@@ -549,7 +551,7 @@ struct SubagentTree: View {
     /// The columns' widths: as wide as the widest title or value, so that they
     /// line up from row to row and a whole row can take a right click.
     fileprivate struct Widths {
-        var model, start, time, tokens, tools, cost, day, week: CGFloat
+        var model, start, time, tokens, tools, compactions, cost, day, week: CGFloat
 
         init(_ lines: [Line], hasLimit: Bool) {
             let title = NSFont.systemFont(ofSize: 11, weight: .medium)
@@ -563,6 +565,7 @@ struct SubagentTree: View {
             time = width("Time", plain) { $0.time }
             tokens = width("Tokens", plain) { $0.tokens }
             tools = width("Tools", plain) { $0.toolsText }
+            compactions = width("Compactions", plain) { "\($0.lane.compactions)" }
             cost = width("Cost", bold) { $0.cost }
             day = hasLimit ? width("Day limit", plain) { $0.day ?? "" } : 0
             week = hasLimit ? width("Week limit", plain) { $0.week ?? "" } : 0
@@ -592,6 +595,10 @@ struct SubagentTree: View {
                 }
             }
             .frame(width: widths.tools, alignment: .trailing)
+            // Most agents have none, so a 0 stays quiet and a real number stands out.
+            Text("\(lane.compactions)")
+                .foregroundStyle(lane.compactions == 0 ? Theme.text3 : Theme.text)
+                .frame(width: widths.compactions, alignment: .trailing)
             Text(line.cost).fontWeight(.medium).frame(width: widths.cost, alignment: .trailing)
             if hasLimit {
                 Text(line.day ?? "").foregroundStyle(Theme.text2).frame(width: widths.day, alignment: .trailing)

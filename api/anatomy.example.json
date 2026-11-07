@@ -42,7 +42,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 102412,
-          "paid_tokens": 20123
+          "paid_tokens": 20123,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "answer",
@@ -70,7 +72,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 102412,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "tool",
@@ -91,7 +95,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 6653,
-          "paid_tokens": 10872
+          "paid_tokens": 10872,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "tool",
@@ -112,7 +118,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 6653,
-          "paid_tokens": 10872
+          "paid_tokens": 10872,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "answer",
@@ -140,7 +148,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 13305,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "compact",
@@ -168,7 +178,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 8552,
-          "paid_tokens": 11266
+          "paid_tokens": 11266,
+          "trigger": "auto",
+          "after_tokens": 2000
         },
         {
           "kind": "prompt",
@@ -189,7 +201,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 8552,
-          "paid_tokens": 11266
+          "paid_tokens": 11266,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "answer",
@@ -217,7 +231,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 17104,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "tool",
@@ -238,7 +254,9 @@
           "refusal": null,
           "command": "git push",
           "cost_micros": null,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         }
       ],
       "context": [
@@ -332,7 +350,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 23004,
-          "paid_tokens": 9052
+          "paid_tokens": 9052,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "answer",
@@ -360,7 +380,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 23004,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "tool",
@@ -381,7 +403,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 2802,
-          "paid_tokens": 9328
+          "paid_tokens": 9328,
+          "trigger": null,
+          "after_tokens": null
         },
         {
           "kind": "answer",
@@ -409,7 +433,9 @@
           "refusal": null,
           "command": null,
           "cost_micros": 2802,
-          "paid_tokens": null
+          "paid_tokens": null,
+          "trigger": null,
+          "after_tokens": null
         }
       ],
       "context": [
