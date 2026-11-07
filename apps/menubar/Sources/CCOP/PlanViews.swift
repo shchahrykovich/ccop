@@ -45,7 +45,7 @@ struct PlanCards: View {
             "\(Format.dollars(s.todayMicros)) today"
         }
         return card(title: "Today", value: part.map(Self.percent) ?? Format.dollars(s.todayMicros), color: color,
-                    fill: part ?? 0, mark: nil, caption: caption)
+                    fill: part ?? 0, caption: caption)
     }
 
     private func weekCard(_ s: WeekStatus) -> some View {
@@ -58,11 +58,12 @@ struct PlanCards: View {
         }
         let reset = s.weekEnd.formatted(.dateTime.weekday(.abbreviated).hour().minute())
         return card(title: "Week", value: used.map(Self.percent) ?? Format.dollars(s.usedMicros), color: color,
-                    fill: used ?? 0, mark: s.elapsedFraction,
+                    fill: used ?? 0, ticks: s.dayTicks, today: s.todayOnBar,
                     caption: "\(Format.percent(s.elapsedFraction)) of week passed · resets \(reset)")
     }
 
-    private func card(title: String, value: String, color: Color, fill: Double, mark: Double?, caption: String) -> some View {
+    private func card(title: String, value: String, color: Color, fill: Double, ticks: [Double] = [], today: ClosedRange<Double>? = nil,
+                      caption: String) -> some View {
         VStack(alignment: .leading, spacing: compact ? 5 : 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title.uppercased()).font(.ui(compact ? 10.5 : 11, .semibold)).tracking(0.44)
@@ -70,7 +71,7 @@ struct PlanCards: View {
                 Spacer()
                 Text(value).font(.ui(compact ? 13 : 17, .semibold)).monospacedDigit().foregroundStyle(color)
             }
-            Meter(value: fill, color: color, mark: mark, height: compact ? 4 : 5)
+            Meter(value: fill, color: color, height: compact ? 4 : 5, ticks: ticks, today: today)
             if !compact {
                 Text(caption).font(.ui(11)).foregroundStyle(Theme.text3).monospacedDigit().lineLimit(1).minimumScaleFactor(0.85)
             }

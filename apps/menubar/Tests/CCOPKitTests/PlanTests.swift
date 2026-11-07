@@ -63,6 +63,25 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(s.elapsedFraction, (4 * 24 + 9.5) / (7 * 24), accuracy: 1e-9)
     }
 
+    func testEachDayStartHasAPlaceOnTheWeekBar() throws {
+        let settings = PlanSettings(resetAnchor: d("2026-10-29T10:00:00Z"), weeklyBudgetMicros: 70_000_000)
+        let report = UsageReport(generatedAt: d("2026-11-02T20:00:00Z"), hours: [])
+        let s = try XCTUnwrap(Plan.status(settings: settings, report: report, now: d("2026-11-02T19:30:00Z"), calendar: utc))
+        // Thursday from 10:00 is 14 of the week's 168 hours; then 24 hours a day.
+        XCTAssertEqual(s.position(of: s.days[0].start), 0)
+        XCTAssertEqual(s.position(of: s.days[1].start), 14.0 / 168, accuracy: 1e-9)
+        XCTAssertEqual(s.position(of: s.days[2].start), 38.0 / 168, accuracy: 1e-9)
+        XCTAssertEqual(s.position(of: s.weekEnd), 1)
+        XCTAssertEqual(s.position(of: d("2026-10-01T00:00:00Z")), 0)
+        // One gap for each day after the first: Fri to the last Thu.
+        XCTAssertEqual(s.dayTicks.count, 7)
+        XCTAssertEqual(s.dayTicks.first!, 14.0 / 168, accuracy: 1e-9)
+        // Today is Monday: from 86 to 110 of the week's 168 hours.
+        let today = try XCTUnwrap(s.todayOnBar)
+        XCTAssertEqual(today.lowerBound, 86.0 / 168, accuracy: 1e-9)
+        XCTAssertEqual(today.upperBound, 110.0 / 168, accuracy: 1e-9)
+    }
+
     func testOnTheLastDayTheAllowanceIsAllThatIsLeft() throws {
         // The week is Wednesday 00:00 to Wednesday 00:00; today is the last day, Tuesday.
         let settings = PlanSettings(resetAnchor: d("2026-10-28T00:00:00Z"), weeklyBudgetMicros: 100_000_000)

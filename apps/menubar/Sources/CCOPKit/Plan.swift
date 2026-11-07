@@ -158,6 +158,21 @@ public struct WeekStatus: Equatable, Sendable {
 
     /// Today against today's allowance; a past day against the daily share
     /// (1/7); nil for a future day.
+    /// Where `date` is on the week bar, 0 at the reset and 1 at the next one.
+    public func position(of date: Date) -> Double {
+        min(1, max(0, date.timeIntervalSince(weekStart) / weekEnd.timeIntervalSince(weekStart)))
+    }
+
+    /// Today's part of the Week card's bar.
+    public var todayOnBar: ClosedRange<Double>? {
+        days.first(where: \.isToday).map { position(of: $0.start) ... position(of: $0.end) }
+    }
+
+    /// The gaps in the Week card's bar: the start of each day after the first.
+    public var dayTicks: [Double] {
+        days.dropFirst().map { position(of: $0.start) }
+    }
+
     public func ofAllowance(_ day: DayStatus) -> Double? {
         if day.isToday { return todayOfAllowance }
         if day.isFuture { return nil }

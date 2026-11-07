@@ -177,20 +177,36 @@ struct IconTile: View {
 struct Meter: View {
     let value: Double
     let color: Color
-    var mark: Double?
     var height: CGFloat = 5
+    /// Gaps across the bar, as parts of its width: the starts of days.
+    var ticks: [Double] = []
+    /// A part of the bar to show as today: a darker track and an outline
+    /// that stays visible when the fill covers it.
+    var today: ClosedRange<Double>?
 
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                // Explicit heights: the ZStack is as tall as the mark, and the
-                // bars must not grow to it.
-                Capsule().fill(Theme.track).frame(height: height)
+                if let today {
+                    RoundedRectangle(cornerRadius: (height + 4) / 2)
+                        .strokeBorder(Theme.text3, lineWidth: 1)
+                        .frame(width: g.size.width * (today.upperBound - today.lowerBound) + 4, height: height + 4)
+                        .offset(x: g.size.width * today.lowerBound - 2)
+                }
+                ZStack(alignment: .leading) {
+                    Theme.track
+                    if let today {
+                        Theme.text3.opacity(0.45)
+                            .frame(width: g.size.width * (today.upperBound - today.lowerBound))
+                            .offset(x: g.size.width * today.lowerBound)
+                    }
+                }
+                .frame(height: height)
+                .clipShape(Capsule())
                 Capsule().fill(color).frame(width: max(0, g.size.width * min(1, value)), height: height)
-                if let mark {
-                    RoundedRectangle(cornerRadius: 1).fill(Theme.text)
-                        .frame(width: 2, height: height + 6)
-                        .offset(x: g.size.width * min(1, max(0, mark)) - 1)
+                ForEach(ticks, id: \.self) { t in
+                    Rectangle().fill(Theme.bg).frame(width: 1.5, height: height)
+                        .offset(x: g.size.width * t - 0.75)
                 }
             }
             .frame(width: g.size.width, height: height)
