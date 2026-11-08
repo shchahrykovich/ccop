@@ -71,5 +71,69 @@
       "errors": 0,
       "ms": 2000
     }
+  ],
+  "calls": [
+    {
+      "session": 0,
+      "tool": 0,
+      "lane": "main",
+      "event": 2,
+      "tool_use_id": "t0",
+      "start": "2026-11-02T10:00:01Z",
+      "cost_micros": 604,
+      "ms": 2000,
+      "result_bytes": 2,
+      "is_error": false,
+      "group": "(empty)"
+    },
+    {
+      "session": 0,
+      "tool": 2,
+      "lane": "main",
+      "event": 4,
+      "tool_use_id": "t1",
+      "start": "2026-11-02T10:01:01Z",
+      "cost_micros": 604,
+      "ms": 2000,
+      "result_bytes": 2,
+      "is_error": false
+    },
+    {
+      "session": 0,
+      "tool": 3,
+      "lane": "main",
+      "event": 6,
+      "tool_use_id": "t2",
+      "start": "2026-11-02T10:02:01Z",
+      "cost_micros": 304,
+      "ms": 2000,
+      "result_bytes": 2,
+      "is_error": true
+    },
+    {
+      "session": 1,
+      "tool": 0,
+      "lane": "main",
+      "event": 2,
+      "tool_use_id": "t0",
+      "start": "2026-11-02T10:00:01Z",
+      "cost_micros": 604,
+      "ms": 2000,
+      "result_bytes": 2,
+      "is_error": true,
+      "group": "(empty)"
+    },
+    {
+      "session": 1,
+      "tool": 1,
+      "lane": "main",
+      "event": 4,
+      "tool_use_id": "t1",
+      "start": "2026-11-02T10:01:01Z",
+      "cost_micros": 304,
+      "ms": 2000,
+      "result_bytes": 2,
+      "is_error": false
+    }
   ]
 }

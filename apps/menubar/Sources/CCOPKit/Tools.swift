@@ -31,20 +31,63 @@ public struct ToolsReport: Codable, Equatable, Sendable {
         public var ms: UInt64
     }
 
+    /// One tool call: the costliest calls of each use, at most 20
+    /// (`CALLS_PER_USE` in `tools.rs`).
+    public struct Call: Codable, Equatable, Sendable {
+        public var session: Int
+        public var tool: Int
+        public var lane: String
+        /// A subagent's name; nil for the main lane.
+        public var laneName: String?
+        public var event: Int
+        public var toolUseId: String?
+        public var start: Date
+        public var costMicros: UInt64
+        public var ms: UInt64
+        public var resultBytes: UInt64?
+        public var isError: Bool
+        public var text: String?
+        public var command: String?
+        public var group: String?
+
+        public init(session: Int, tool: Int, lane: String = "main", laneName: String? = nil, event: Int, toolUseId: String? = nil,
+                    start: Date = Date(timeIntervalSince1970: 0), costMicros: UInt64, ms: UInt64 = 0, resultBytes: UInt64? = nil,
+                    isError: Bool = false, text: String? = nil, command: String? = nil, group: String? = nil) {
+            self.session = session
+            self.tool = tool
+            self.lane = lane
+            self.laneName = laneName
+            self.event = event
+            self.toolUseId = toolUseId
+            self.start = start
+            self.costMicros = costMicros
+            self.ms = ms
+            self.resultBytes = resultBytes
+            self.isError = isError
+            self.text = text
+            self.command = command
+            self.group = group
+        }
+    }
+
+    /// The JSON keeps this many of the costliest calls of each session and
+    /// tool, so the list of any sessions is right up to this many calls.
+    public static let callsPerUse = 20
+
     public var sessions: [SessionRef]
     public var tools: [Tool]
     public var uses: [Use]
+    public var calls: [Call]
 
-    public init(sessions: [SessionRef], tools: [Tool], uses: [Use]) {
+    public init(sessions: [SessionRef], tools: [Tool], uses: [Use], calls: [Call] = []) {
         self.sessions = sessions
         self.tools = tools
         self.uses = uses
+        self.calls = calls
     }
 
     public static func decode(_ data: Data) throws -> ToolsReport {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        return try d.decode(ToolsReport.self, from: data)
+        try Session.makeDecoder().decode(ToolsReport.self, from: data)
     }
 }
 
@@ -147,6 +190,21 @@ public struct ToolSessionShare: Identifiable, Equatable, Sendable {
 }
 
 /// The table of projects × tools: the cost and the sessions of each cell.
+/// One tool call in the Tools mode, with its session.
+public struct ToolCallRow: Identifiable, Equatable, Sendable {
+    public var sessionID: String
+    public var sessionTitle: String
+    public var projectDir: String
+    public var tool: String
+    public var call: ToolsReport.Call
+    public var id: String { "\(sessionID) \(call.lane) \(call.event)" }
+    public var projectName: String { ToolProjectShare.name(projectDir) }
+    /// What the call did: a Bash command, else a short form of the input.
+    public var summary: String { call.command ?? call.text ?? ToolName(tool).short }
+    /// The description of a Bash call, when the summary is its command.
+    public var detail: String? { call.command != nil && call.text != call.command ? call.text : nil }
+}
+
 public struct ToolMatrix: Equatable, Sendable {
     public struct Cell: Equatable, Sendable {
         public var costMicros: UInt64
@@ -182,6 +240,7 @@ public struct ToolsData: Equatable, Sendable {
     private let report: ToolsReport
     /// Indexes of `report.uses` whose session is kept.
     private let uses: [Int]
+    private let callIndices: [Int]
     public let sessionCount: Int
     /// All kept sessions' cost, tools or not.
     public let costMicros: UInt64
@@ -198,6 +257,7 @@ public struct ToolsData: Equatable, Sendable {
         let kept = report.sessions.indices.filter { keep?.contains(report.sessions[$0].id) ?? true }
         let keptSet = Set(kept)
         uses = report.uses.indices.filter { keptSet.contains(report.uses[$0].session) && report.uses[$0].tool < report.tools.count }
+        callIndices = report.calls.indices.filter { keptSet.contains(report.calls[$0].session) && report.calls[$0].tool < report.tools.count }
         sessionCount = kept.count
         costMicros = kept.reduce(0) { $0 + report.sessions[$1].costMicros }
         var serverSets: [Int: Set<String>] = [:]
@@ -273,6 +333,18 @@ public struct ToolsData: Equatable, Sendable {
 
     /// Projects × tools: Claude Code's costliest tools, then the servers.
     /// `columns` projects at most, the most cost first.
+    /// The costliest calls of a tool or a server in the sessions kept, the
+    /// most cost first. More than `ToolsReport.callsPerUse` could miss some.
+    public func calls(_ pick: ToolPick, limit: Int = ToolsReport.callsPerUse) -> [ToolCallRow] {
+        let picked = callIndices.filter { matches(pick, tool: report.calls[$0].tool) }
+            .sorted { (report.calls[$0].costMicros, $1) > (report.calls[$1].costMicros, $0) }
+        return picked.prefix(limit).map { i in
+            let c = report.calls[i]
+            let s = report.sessions[c.session]
+            return ToolCallRow(sessionID: s.id, sessionTitle: s.title, projectDir: s.projectDir, tool: report.tools[c.tool].name, call: c)
+        }
+    }
+
     public func matrix(columns: Int = 8, builtIns builtInRows: Int = 9) -> ToolMatrix {
         var projectCost: [String: UInt64] = [:]
         for i in uses {
@@ -308,7 +380,11 @@ public struct ToolsData: Equatable, Sendable {
     }
 
     private func matches(_ pick: ToolPick, _ u: ToolsReport.Use) -> Bool {
-        let t = report.tools[u.tool]
+        matches(pick, tool: u.tool)
+    }
+
+    private func matches(_ pick: ToolPick, tool: Int) -> Bool {
+        let t = report.tools[tool]
         switch pick {
         case .all: return true
         case let .server(s): return t.server == s

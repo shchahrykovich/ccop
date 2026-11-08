@@ -333,6 +333,13 @@ final class AppModel {
         windowTab = .cause
     }
 
+    /// One call of the Tools mode, shown in its session's Chat tab.
+    func openCallInSession(_ sessionID: String, lane: String, event: Int) {
+        sidebarMode = .sessions
+        windowSelectedID = sessionID
+        openInChat(ChatPlace(lane: lane, event: event))
+    }
+
     var visible: [Session] {
         SessionList.filter(sessions, query: query, period: period, folder: folder, flagged: flagged, now: now)
     }

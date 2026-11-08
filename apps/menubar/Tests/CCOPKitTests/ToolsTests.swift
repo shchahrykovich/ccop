@@ -17,6 +17,11 @@ final class ToolsContractTests: XCTestCase {
         XCTAssertEqual(Set(data.servers.map(\.title)), ["wiki", "box"])
         XCTAssertEqual(data.builtIns.map(\.title), ["Bash"])
         XCTAssertEqual(data.builtIns[0].errors, 1)
+        XCTAssertEqual(r.calls.count, 5, "one call per use in the example")
+        let bash = data.calls(.tool("Bash"))
+        XCTAssertEqual(bash.count, 2)
+        XCTAssertNotNil(bash[0].call.toolUseId)
+        XCTAssertGreaterThan(bash[0].call.start, Date(timeIntervalSince1970: 0))
     }
 }
 
@@ -124,6 +129,49 @@ final class ToolsDataTests: XCTestCase {
         let bash = ToolsData(report: report, keep: nil).sessions(.tool("Bash"))
         XCTAssertEqual(bash.map(\.id), ["s1", "s2"])
         XCTAssertEqual(bash[0].topTool, "Bash")
+    }
+
+    /// s1: Bash calls of $2 and $1 (a command with its description), a wiki
+    /// search of $0.30 (an error); s2: a Bash call of $0.80; s3: a wiki
+    /// get_page of $1.50 in a subagent.
+    private var reportWithCalls: ToolsReport {
+        var r = report
+        r.calls = [
+            .init(session: 0, tool: 0, event: 2, costMicros: 2_000_000, text: "Show the notes", command: "sed -n 1,9p notes.txt", group: "sed"),
+            .init(session: 0, tool: 0, event: 4, costMicros: 1_000_000, text: "ls", command: "ls"),
+            .init(session: 0, tool: 3, event: 6, costMicros: 300_000, isError: true, text: "beds"),
+            .init(session: 1, tool: 0, event: 2, costMicros: 800_000, command: "make"),
+            .init(session: 2, tool: 2, lane: "a1", laneName: "Read the recipes", event: 3, costMicros: 1_500_000, text: "bread"),
+        ]
+        return r
+    }
+
+    func testTheCallsOfAToolHaveTheMostCostFirst() {
+        let bash = ToolsData(report: reportWithCalls, keep: nil).calls(.tool("Bash"))
+        XCTAssertEqual(bash.map(\.call.costMicros), [2_000_000, 1_000_000, 800_000])
+        XCTAssertEqual(bash.map(\.sessionID), ["s1", "s1", "s2"])
+        XCTAssertEqual(bash[0].summary, "sed -n 1,9p notes.txt", "a Bash call shows its command")
+        XCTAssertEqual(bash[0].detail, "Show the notes", "and its description under it")
+        XCTAssertNil(bash[1].detail, "a description that is the command is not said twice")
+        XCTAssertEqual(bash[0].projectName, "garden")
+        XCTAssertEqual(bash[0].sessionTitle, "Plant the beds")
+        XCTAssertEqual(Set(bash.map(\.id)).count, 3)
+    }
+
+    func testTheCallsOfAServerAreOfAllItsTools() {
+        let wiki = ToolsData(report: reportWithCalls, keep: nil).calls(.server("wiki"))
+        XCTAssertEqual(wiki.map(\.tool), ["mcp__wiki__get_page", "mcp__wiki__search"])
+        XCTAssertEqual(wiki[0].call.laneName, "Read the recipes")
+        XCTAssertEqual(wiki[1].summary, "beds")
+        XCTAssertTrue(wiki[1].call.isError)
+        XCTAssertEqual(ToolsData(report: reportWithCalls, keep: nil).calls(.all).count, 5)
+    }
+
+    func testTheCallsAreOnlyOfTheKeptSessionsAndAtMostTheLimit() {
+        let d = ToolsData(report: reportWithCalls, keep: ["s2", "s3"])
+        XCTAssertEqual(d.calls(.tool("Bash")).map(\.sessionID), ["s2"])
+        XCTAssertEqual(ToolsData(report: reportWithCalls, keep: nil).calls(.tool("Bash"), limit: 2).count, 2)
+        XCTAssertEqual(ToolsData(report: report, keep: nil).calls(.tool("Bash")), [], "an older report has no calls")
     }
 
     func testTheMatrixHasClaudeCodesToolsThenServersByProject() {

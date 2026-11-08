@@ -312,6 +312,7 @@ private struct ToolDetail: View {
                 } else {
                     ProjectBars(projects: data.projects(pick)).frame(maxWidth: 520, alignment: .leading)
                 }
+                ToolCallsTable(rows: data.calls(pick), totalCalls: total.calls, showsTool: pick.isServer)
                 ToolSessionsTable(rows: data.sessions(pick), sessionCount: data.sessionCount)
             }
         } else {
@@ -517,6 +518,147 @@ private struct ToolSessionsTable: View {
                     .buttonStyle(DesignButtonStyle())
                     .padding(.top, 6)
             }
+        }
+    }
+}
+
+/// The costliest single calls of a tool or a server in the sessions of the
+/// list. A click shows the whole call; Go to Chat opens its session.
+private struct ToolCallsTable: View {
+    @Environment(AppModel.self) private var model
+    let rows: [ToolCallRow]
+    let totalCalls: UInt64
+    let showsTool: Bool
+    @State private var sort = TableSort<Column>()
+    @State private var shown: ToolCallRow?
+
+    enum Column { case time, output, cost }
+
+    private let room = SortTitle<Column>.arrowRoom
+
+    var body: some View {
+        if !rows.isEmpty {
+            let sorted = sort.sorted(rows) { column, a, b in
+                switch column {
+                case .time: a.call.ms < b.call.ms
+                case .output: (a.call.resultBytes ?? 0) < (b.call.resultBytes ?? 0)
+                case .cost: a.call.costMicros < b.call.costMicros
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                SectionTitle(title: "Costliest calls",
+                             note: "the \(rows.count.formatted()) costliest of \(totalCalls.formatted()) · cost: its part of the model call after it · click one to see it in full")
+                HStack(spacing: 8) {
+                    Text("Call").frame(maxWidth: .infinity, alignment: .leading)
+                    if showsTool { Text("Tool").frame(width: 130, alignment: .leading) }
+                    Text("Session").frame(width: 240, alignment: .leading)
+                    SortTitle(title: "Time", column: Column.time, sort: $sort, help: "From the call to its result")
+                        .frame(width: 56 + room, alignment: .trailing)
+                    SortTitle(title: "Output", column: Column.output, sort: $sort).frame(width: 64 + room, alignment: .trailing)
+                    SortTitle(title: "Cost", column: Column.cost, sort: $sort).frame(width: 64 + room, alignment: .trailing)
+                }
+                .font(.ui(11, .medium)).foregroundStyle(Theme.text3)
+                Rectangle().fill(Theme.line).frame(height: 1)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(sorted) { r in
+                        row(r)
+                        Rectangle().fill(Theme.line2).frame(height: 1)
+                    }
+                }
+            }
+            .sheet(item: $shown) { r in ToolCallSheet(row: r) }
+        }
+    }
+
+    private func row(_ r: ToolCallRow) -> some View {
+        Button { shown = r } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        if r.call.isError {
+                            Image(systemName: "exclamationmark.circle.fill").font(.ui(11)).foregroundStyle(Theme.warn).help("The call failed")
+                        }
+                        Text(r.summary).font(.mono(12)).lineLimit(1).truncationMode(.tail)
+                    }
+                    if let detail = r.detail {
+                        Text(detail).font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if showsTool {
+                    Text(ToolName(r.tool).short).foregroundStyle(Theme.text2).lineLimit(1).frame(width: 130, alignment: .leading)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(r.sessionTitle).lineLimit(1)
+                    Text(([r.projectName] + [r.call.laneName].compactMap { $0 }).joined(separator: " · "))
+                        .font(.ui(11)).foregroundStyle(Theme.text3).lineLimit(1)
+                }
+                .frame(width: 240, alignment: .leading)
+                Text(Format.duration(Double(r.call.ms) / 1000)).foregroundStyle(Theme.text2).frame(width: 56 + room, alignment: .trailing)
+                Text(r.call.resultBytes.map { Format.bytes($0) } ?? "–").foregroundStyle(Theme.text2).frame(width: 64 + room, alignment: .trailing)
+                Text(Format.dollars(r.call.costMicros)).fontWeight(.medium).frame(width: 64 + room, alignment: .trailing)
+            }
+            .monospacedDigit()
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverRow()
+        .help([r.call.text, r.call.command].compactMap { $0 }.joined(separator: "\n\n"))
+        .contextMenu {
+            Button("View") { shown = r }
+            Button("Go to Chat") { model.openCallInSession(r.sessionID, lane: r.call.lane, event: r.call.event) }
+            Button("Open at Cause: \(ToolName(r.tool).short)") { model.openToolInSession(r.sessionID, tool: r.tool) }
+            Divider()
+            Button(r.call.command != nil ? "Copy Command" : "Copy Text") { model.copy(r.summary) }
+            Button("Copy Session ID") { model.copy(r.sessionID) }
+        }
+    }
+}
+
+/// One call of the Tools mode in full. It has no anatomy of its session, so
+/// it shows what `ccop tools` says about the call, then its input and output.
+private struct ToolCallSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let row: ToolCallRow
+
+    var body: some View {
+        let c = row.call
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(ToolName(row.tool).short).font(.title3.weight(.semibold))
+                if let g = c.group { Text(g).font(.callout.monospaced()).foregroundStyle(.secondary) }
+                Spacer()
+                Button("Go to Chat") {
+                    dismiss()
+                    model.openCallInSession(row.sessionID, lane: c.lane, event: c.event)
+                }
+                .help("Close this, open the session and show this call in its Chat tab")
+                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            Text(([row.sessionTitle, row.projectName, c.laneName ?? "Main session",
+                   c.start.formatted(date: .abbreviated, time: .standard)] + [c.text].compactMap { $0 }).joined(separator: " · "))
+                .font(.callout).foregroundStyle(.secondary).lineLimit(2)
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
+                fact("Time", Format.duration(Double(c.ms) / 1000))
+                fact("Output", c.resultBytes.map { Format.bytes($0) } ?? "no result")
+                fact("Cost", "\(Format.dollars(c.costMicros)), its part of the model call after it", bold: true)
+            }
+            .font(.callout)
+            .textSelection(.enabled)
+            Divider()
+            CallInputOutput(sessionID: row.sessionID, toolUseID: c.toolUseId)
+        }
+        .padding(16)
+        .frame(minWidth: 720, idealWidth: 920, minHeight: 480, idealHeight: 720)
+        .closesOnClickOutside { dismiss() }
+    }
+
+    private func fact(_ name: String, _ value: String, bold: Bool = false) -> some View {
+        GridRow {
+            Text(name).foregroundStyle(.secondary)
+            Text(value).fontWeight(bold ? .semibold : .regular).monospacedDigit()
         }
     }
 }

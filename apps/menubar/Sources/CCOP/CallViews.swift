@@ -56,10 +56,6 @@ struct CallSheet: View {
     let sessionID: String
     let lane: AnatomyLane
     let index: Int
-    @State private var call: Loadable<ToolCall> = .loading
-
-    /// More than this is slow in a SwiftUI Text; Copy copies all of it.
-    static let shownChars = 60_000
 
     var body: some View {
         let e = lane.events[index]
@@ -79,12 +75,34 @@ struct CallSheet: View {
                 .font(.callout).foregroundStyle(.secondary).lineLimit(2)
             CallConsumption(lane: lane, index: index)
             Divider()
+            CallInputOutput(sessionID: sessionID, toolUseID: e.toolUseId)
+        }
+        .padding(16)
+        .frame(minWidth: 720, idealWidth: 920, minHeight: 480, idealHeight: 720)
+        .closesOnClickOutside { dismiss() }
+    }
+}
+
+/// The whole input and output of one tool call, read with `ccop call`.
+struct CallInputOutput: View {
+    @Environment(AppModel.self) private var model
+    let sessionID: String
+    let toolUseID: String?
+    @State private var call: Loadable<ToolCall> = .loading
+
+    /// More than this is slow in a SwiftUI Text; Copy copies all of it.
+    static let shownChars = 60_000
+
+    var body: some View {
+        Group {
             switch call {
             case .loading:
                 ProgressView("Reading the call…").frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .failed(why):
-                Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).textSelection(.enabled)
-                Spacer()
+                VStack(alignment: .leading) {
+                    Label(why, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).textSelection(.enabled)
+                    Spacer()
+                }
             case let .loaded(c):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -98,11 +116,8 @@ struct CallSheet: View {
                 }
             }
         }
-        .padding(16)
-        .frame(minWidth: 720, idealWidth: 920, minHeight: 480, idealHeight: 720)
-        .closesOnClickOutside { dismiss() }
-        .task {
-            guard let id = e.toolUseId else { call = .failed("This call has no id in the transcript."); return }
+        .task(id: toolUseID) {
+            guard let id = toolUseID else { call = .failed("This call has no id in the transcript."); return }
             switch await model.call(sessionID, toolUseID: id) {
             case let .success(c): call = .loaded(c)
             case let .failure(err): call = .failed(err.localizedDescription)

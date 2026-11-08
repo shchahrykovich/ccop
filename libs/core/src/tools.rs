@@ -4,11 +4,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::Session;
 use crate::anatomy::Anatomy;
-use crate::spend::CauseKind;
+use crate::spend::{CallCost, CauseKind};
 use crate::timing::{clock_by_name, tool_name};
 
 /// The server of an MCP tool, as in its name: `mcp__wiki__get_page` → `wiki`.
@@ -26,6 +27,51 @@ pub struct ToolsReport {
     pub tools: Vec<ToolInfo>,
     /// One per session and tool that it called.
     pub uses: Vec<ToolUse>,
+    /// The costliest calls of each use, at most `CALLS_PER_USE`, so the
+    /// costliest calls of any list of sessions are here up to that number.
+    pub calls: Vec<ToolCallCost>,
+}
+
+/// How many of the costliest calls of each session and tool the JSON keeps.
+/// All sessions have about 150,000 calls; 20 each keeps about 46,000.
+pub const CALLS_PER_USE: usize = 20;
+
+/// The longest text of a call in the JSON, in characters.
+const CALL_TEXT_CHARS: usize = 160;
+
+/// One tool call of a session.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ToolCallCost {
+    /// The index in `sessions`.
+    pub session: usize,
+    /// The index in `tools`.
+    pub tool: usize,
+    /// `Lane.id`: `main`, or a subagent's id.
+    pub lane: String,
+    /// A subagent's `Lane.name`; None for the main lane.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lane_name: Option<String>,
+    /// The index of the call in `Lane.events`.
+    pub event: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    pub start: DateTime<Utc>,
+    /// Its part of the model call after it (see `spend::Cause`).
+    pub cost_micros: u64,
+    /// From the call to its result.
+    pub ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_bytes: Option<u64>,
+    pub is_error: bool,
+    /// A short form of the input (for Bash: its description, or its command).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Bash: the start of its command.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Bash: the program it ran (`sed`, `node build.js context`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -71,6 +117,8 @@ struct Use {
     calls: u64,
     errors: u64,
     ms: u64,
+    /// The costliest calls, the most cost first; `session` and `tool` are not set.
+    top: Vec<ToolCallCost>,
 }
 
 /// The tool uses of one session, or of many added up with `merge`.
@@ -103,6 +151,7 @@ impl ToolUses {
                 calls: c.count,
                 errors: c.errors,
                 ms: ms.get(c.name.as_str()).copied().unwrap_or(0),
+                top: costliest(a, &c.items),
             });
         }
         out
@@ -132,7 +181,15 @@ impl ToolUses {
             .iter()
             .map(|u| ToolUse { session: u.session, tool: index[u.tool.as_str()], cost_micros: u.cost, calls: u.calls, errors: u.errors, ms: u.ms })
             .collect();
-        ToolsReport { sessions: self.sessions.clone(), tools, uses }
+        let calls = self
+            .uses
+            .iter()
+            .flat_map(|u| {
+                let tool = index[u.tool.as_str()];
+                u.top.iter().map(move |c| ToolCallCost { session: u.session, tool, ..c.clone() })
+            })
+            .collect();
+        ToolsReport { sessions: self.sessions.clone(), tools, uses, calls }
     }
 
     pub fn session_count(&self) -> usize {
@@ -216,6 +273,46 @@ impl ToolUses {
         let mut out: Vec<_> = by.into_iter().map(|(i, (c, n, e))| (&self.sessions[i], c, n, e)).collect();
         out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.id.cmp(&b.0.id)));
         out
+    }
+}
+
+/// The costliest `CALLS_PER_USE` of these calls, the most cost first; the
+/// earlier call first when two cost the same.
+fn costliest(a: &Anatomy, items: &[CallCost]) -> Vec<ToolCallCost> {
+    let mut items: Vec<&CallCost> = items.iter().collect();
+    items.sort_by_key(|i| std::cmp::Reverse(i.cost_micros));
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let lane = a.lanes.iter().find(|l| l.id == item.lane)?;
+            let e = lane.events.get(item.event)?;
+            Some(ToolCallCost {
+                session: 0,
+                tool: 0,
+                lane: lane.id.clone(),
+                lane_name: (lane.id != "main").then(|| lane.name.clone()),
+                event: item.event,
+                tool_use_id: e.tool_use_id.clone(),
+                start: e.start,
+                cost_micros: item.cost_micros,
+                ms: (e.end - e.start).num_milliseconds().max(0) as u64,
+                result_bytes: e.result_bytes,
+                is_error: e.is_error,
+                text: e.text.as_deref().map(cut),
+                command: e.command.as_deref().map(cut),
+                group: e.group.clone(),
+            })
+        })
+        .take(CALLS_PER_USE)
+        .collect()
+}
+
+/// The first `CALL_TEXT_CHARS` characters, on one line.
+fn cut(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match line.char_indices().nth(CALL_TEXT_CHARS) {
+        Some((at, _)) => format!("{}…", &line[..at]),
+        None => line,
     }
 }
 
@@ -320,6 +417,81 @@ mod tests {
         let mut all = uses("s1", "/made/up/shop", &["Bash", "mcp__wiki__get_page", "mcp__wiki__search!", "mcp__books__list"]);
         all.merge(uses("s2", "/made/up/farm", &["Bash", "Bash", "mcp__wiki__get_page"]));
         all
+    }
+
+    /// Calls of one tool; the model call after call `i` reads `context[i]`
+    /// tokens, so each call has its own cost.
+    fn anatomy_with(id: &str, tool: &str, input: Value, context: &[u64]) -> Anatomy {
+        let mut r = LaneReader::main();
+        r.feed(&json!({"type": "user", "timestamp": at("00:00"), "message": {"content": "go"}}).to_string());
+        let mut read = 100;
+        for (i, next) in context.iter().enumerate() {
+            r.feed(
+                &json!({"type": "assistant", "requestId": format!("r{i}"), "timestamp": at(&format!("{:02}:01", i)),
+                        "message": {"id": format!("m{i}"), "model": "claude-opus-5-5", "content": [{"type": "tool_use", "id": format!("t{i}"), "name": tool, "input": input}],
+                                    "usage": {"input_tokens": 1, "cache_read_input_tokens": read, "output_tokens": 10}}})
+                .to_string(),
+            );
+            r.feed(&result(&format!("{:02}:03", i), &format!("t{i}"), i == 1).to_string());
+            read = *next;
+        }
+        r.feed(
+            &json!({"type": "assistant", "requestId": "rl", "timestamp": at("59:00"),
+                    "message": {"id": "ml", "model": "claude-opus-5-5", "content": [], "usage": {"input_tokens": 1, "cache_read_input_tokens": read, "output_tokens": 10}}})
+            .to_string(),
+        );
+        build(id, r.finish(), Vec::new())
+    }
+
+    #[test]
+    fn the_report_keeps_the_costliest_calls_of_each_session_and_tool() {
+        // 25 calls; call i makes the next model call read (i * 7 % 25 + 1) * 1000 tokens.
+        let context: Vec<u64> = (0..25).map(|i| (i * 7 % 25 + 1) * 1000).collect();
+        let mut all = ToolUses::of(&session("s1", "/made/up/shop"), &anatomy_with("s1", "Bash", json!({"command": "ls"}), &context));
+        all.merge(ToolUses::of(&session("s2", "/made/up/farm"), &anatomy_with("s2", "mcp__wiki__search", json!({"query": "beds"}), &[5000, 9000])));
+        let r = all.report();
+
+        let bash: Vec<&ToolCallCost> = r.calls.iter().filter(|c| r.tools[c.tool].name == "Bash").collect();
+        assert_eq!(bash.len(), CALLS_PER_USE, "25 calls, the costliest 20 kept");
+        assert!(bash.iter().all(|c| r.sessions[c.session].id == "s1"));
+        assert!(bash.windows(2).all(|w| w[0].cost_micros >= w[1].cost_micros), "the most cost first");
+        let kept: u64 = bash.iter().map(|c| c.cost_micros).sum();
+        let s1_bash = r.uses.iter().find(|u| r.tools[u.tool].name == "Bash").unwrap();
+        assert!(kept < s1_bash.cost_micros, "the 5 cheapest calls are not in the list");
+        let cheapest_kept = bash.last().unwrap().cost_micros;
+        let lane = &anatomy_with("s1", "Bash", json!({"command": "ls"}), &context).spend;
+        let dropped = lane.causes.iter().find(|c| c.name == "Bash").unwrap().items.iter().filter(|i| i.cost_micros < cheapest_kept).count();
+        assert_eq!(dropped, 5);
+
+        let wiki: Vec<&ToolCallCost> = r.calls.iter().filter(|c| r.tools[c.tool].name == "mcp__wiki__search").collect();
+        assert_eq!(wiki.len(), 2);
+        assert!(wiki.iter().all(|c| r.sessions[c.session].id == "s2"), "the second session's calls point at it after the merge");
+        assert_eq!(wiki[0].event, 4, "the second call (event 4: prompt, answer, tool, answer, tool) costs more: the call after it reads 9000 tokens");
+        assert_eq!(wiki[0].text.as_deref(), Some("beds"));
+        assert!(wiki.iter().any(|c| c.is_error), "the second call failed");
+        assert_eq!((wiki[0].lane.as_str(), wiki[0].lane_name.as_deref()), ("main", None), "the main lane has no name in the JSON");
+        assert!(wiki[0].tool_use_id.is_some());
+        assert_eq!(wiki[0].ms, 2000);
+    }
+
+    #[test]
+    fn a_bash_call_has_its_description_command_and_program() {
+        let input = json!({"command": "sed -n '1,20p' notes.txt", "description": "Show the notes"});
+        let r = ToolUses::of(&session("s1", "/made/up/shop"), &anatomy_with("s1", "Bash", input, &[1000])).report();
+        let c = &r.calls[0];
+        assert_eq!(c.text.as_deref(), Some("Show the notes"));
+        assert_eq!(c.command.as_deref(), Some("sed -n '1,20p' notes.txt"));
+        assert_eq!(c.group.as_deref(), Some("sed"));
+    }
+
+    #[test]
+    fn a_long_text_is_cut_to_one_line() {
+        assert_eq!(cut("one\n  two\tthree"), "one two three");
+        let long = "é".repeat(CALL_TEXT_CHARS + 5);
+        let short = cut(&long);
+        assert_eq!(short.chars().count(), CALL_TEXT_CHARS + 1);
+        assert!(short.ends_with('…'));
+        assert_eq!(cut(&"a".repeat(CALL_TEXT_CHARS)), "a".repeat(CALL_TEXT_CHARS));
     }
 
     #[test]
