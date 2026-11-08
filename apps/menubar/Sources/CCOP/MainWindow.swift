@@ -115,7 +115,7 @@ struct WindowDetail: View {
             Rectangle().fill(Theme.line).frame(height: 1)
             switch model.windowTab {
             case .overview:
-                SessionDetailView(session: session, inWindow: true)
+                SessionDetailView(session: session)
             case .spend, .cause, .chat, .anatomy, .context:
                 AnatomyLoader(session: session, tab: model.windowTab)
             }

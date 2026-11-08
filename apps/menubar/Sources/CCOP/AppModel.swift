@@ -25,7 +25,6 @@ final class AppModel {
     var flagged = SessionFlags.load() {
         didSet { SessionFlags.save(flagged) }
     }
-    var selectedID: String?
     var now = Date()
     var popoverOpen = false {
         didSet { if popoverOpen, !oldValue, !paused { refresh() } }
@@ -250,10 +249,6 @@ final class AppModel {
     /// The folder menu: folders with sessions in the period, and the chosen one.
     var folderChoices: [FolderChoice] {
         SessionList.folders(sessions, period: period, flagged: flagged, keeping: folder?.path, now: now)
-    }
-
-    var selected: Session? {
-        selectedID.flatMap { id in sessions.first { $0.id == id } }
     }
 
     var activeCount: Int { sessions.filter(\.active).count }

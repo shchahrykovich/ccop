@@ -1,21 +1,13 @@
 import CCOPKit
 import SwiftUI
 
-/// The popover: the session list, or one session's details.
+/// The popover: the session list. A click on a session opens it in the main window.
 struct MainView: View {
-    @Environment(AppModel.self) private var model
-
     var body: some View {
-        VStack(spacing: 0) {
-            if let s = model.selected {
-                SessionDetailView(session: s, inWindow: false)
-            } else {
-                SessionListView { model.selectedID = $0 }
-            }
-        }
-        .background(Theme.pop)
-        .foregroundStyle(Theme.text)
-        .font(.ui(13))
+        SessionListView()
+            .background(Theme.pop)
+            .foregroundStyle(Theme.text)
+            .font(.ui(13))
     }
 }
 
@@ -23,7 +15,6 @@ struct MainView: View {
 /// search, totals, then the sessions by day.
 struct SessionListView: View {
     @Environment(AppModel.self) private var model
-    let select: (String) -> Void
 
     var body: some View {
         @Bindable var model = model
@@ -60,9 +51,9 @@ struct SessionListView: View {
                             Section {
                                 if !collapsed {
                                     ForEach(section.sessions) { s in
-                                        SessionRow(session: s, now: model.now, flagged: model.flagged.contains(s.id),
-                                                   select: { select(s.id) },
-                                                   openWindow: { model.openWindow?(s.id, .overview) })
+                                        SessionRow(session: s, now: model.now, flagged: model.flagged.contains(s.id)) {
+                                            model.openWindow?(s.id, .overview)
+                                        }
                                         .contextMenu { SessionMenu(model: model, session: s) }
                                     }
                                 }
@@ -215,7 +206,16 @@ struct SessionMenu: View {
 
     var body: some View {
         Button(model.flagged.contains(session.id) ? "Remove Flag" : "Flag") { model.toggleFlag(session) }
+        Divider()
+        Button("Resume in Terminal") { model.resumeInTerminal(session) }
+        Button("Copy Resume Command") { model.copyResumeCommand(session) }
         Button("Copy for Agent") { model.copyForAgent(session) }
+        Divider()
+        Button("Copy Session ID") { model.copy(session.id) }
+        Button("Copy Project Folder Path") { model.copy(session.projectDir) }
+        Divider()
+        Button("Show Transcript in Finder") { model.revealTranscript(session) }
+        Button("Open Project Folder") { model.openProjectFolder(session) }
     }
 }
 
@@ -458,12 +458,11 @@ struct SessionRow: View {
     let session: Session
     let now: Date
     var flagged = false
-    let select: () -> Void
-    let openWindow: () -> Void
+    let open: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(action: select) {
+            Button(action: open) {
                 HStack(alignment: .top, spacing: 8) {
                     dot.padding(.top, 5)
                     VStack(alignment: .leading, spacing: 2) {
@@ -486,8 +485,7 @@ struct SessionRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Show this session in the popover")
-            SmallIconButton(symbol: "macwindow", help: "Open in the main window", action: openWindow)
+            .help("Open this session in the main window")
         }
         .padding(.trailing, 14)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line2).frame(height: 1) }

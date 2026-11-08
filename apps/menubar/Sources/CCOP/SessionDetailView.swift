@@ -1,119 +1,20 @@
 import CCOPKit
 import SwiftUI
 
-/// One session: in the popover a compact view with a bar of actions (board
-/// "Popover · one session"); in the window the Overview tab (board
-/// "Window · Overview").
+/// One session in the main window: the Overview tab (board "Window · Overview").
 struct SessionDetailView: View {
     @Environment(AppModel.self) private var model
     let session: Session
-    /// In the main window: no back button, the window has tabs.
-    let inWindow: Bool
     @State private var wide = true
     @State private var fourCards = true
 
-    var body: some View {
-        Group {
-            if inWindow {
-                overview
-            } else {
-                popover
-                    .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
-            }
-        }
-    }
+    var body: some View { overview }
 
     private var anatomy: Anatomy? {
-        // In the window, the anatomy of the tab: new data does not change it.
-        if case let .loaded(a, _) = inWindow ? model.windowAnatomy : model.anatomies[session.id] { return a }
+        // The anatomy of the tab: new data does not change it.
+        if case let .loaded(a, _) = model.windowAnatomy { return a }
         return nil
     }
-
-    // MARK: Popover
-
-    private var popover: some View {
-        let s = session
-        return VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Button { model.selectedID = nil } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                        Text("Sessions")
-                    }
-                    .font(.ui(13, .medium))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 6)
-                    .frame(height: 28)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                if s.active { ActivePill() }
-                FlagButton(session: s)
-                Button { model.openWindow?(s.id, .overview) } label: { IconLabel(title: "Open in window", symbol: "macwindow") }
-                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 26, padding: 10, fontSize: 12))
-                    .help("Open this session in the main window")
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            Rectangle().fill(Theme.line).frame(height: 1)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(s.title).font(.ui(17, .semibold)).tracking(-0.17).textSelection(.enabled).lineLimit(3)
-                        Text(metaLine(s)).font(.ui(12)).foregroundStyle(Theme.text3).lineLimit(1)
-                    }
-                    HStack(spacing: 8) {
-                        StatCard(label: "Cost", value: Format.dollars(s.costMicros))
-                        StatCard(label: "Tokens", value: Format.tokens(s.usage.total))
-                        StatCard(label: "Model calls", value: "\(s.usage.requests)")
-                        StatCard(label: "From cache", value: Format.percent(s.usage.cacheHitRatio))
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        UsageBar(usage: s.usage, legend: false)
-                        UsageTable(session: s, anatomy: anatomy, compact: true)
-                    }
-                    TopTipLink(session: s)
-                    if let p = s.lastPrompt ?? s.firstPrompt {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text((s.lastPrompt != nil ? "Last prompt" : "First prompt").uppercased())
-                                .font(.ui(11, .semibold)).tracking(0.44).foregroundStyle(Theme.text3)
-                            Text(p).lineSpacing(2.5).lineLimit(4).textSelection(.enabled)
-                        }
-                    }
-                    Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 0) {
-                        GridRow { label("Project", 22); CopyableValue(text: Theme.shortPath(s.projectDir), help: "Copy the project path") }
-                        GridRow { label("Prompts", 22); value(promptsLine(s), 22) }
-                        GridRow { label("Transcript", 22); value(transcriptLine(s), 22) }
-                        GridRow { label("Session id", 22); CopyableValue(text: s.id, help: "Copy the session id") }
-                    }
-                    .font(.ui(12))
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 8) {
-                Button { model.resumeInTerminal(s) } label: { IconLabel(title: "Resume in Terminal", symbol: "terminal", iconSize: 14) }
-                    .buttonStyle(DesignButtonStyle(kind: .primary, height: 28, padding: 12))
-                Button { model.copyResumeCommand(s) } label: { IconLabel(title: "Copy command", symbol: "doc.on.doc", iconSize: 14) }
-                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 28, padding: 10))
-                    .help(Resume.command(s))
-                Button { model.copyForAgent(s) } label: { IconLabel(title: "Copy for Agent", symbol: "sparkles", iconSize: 14) }
-                    .buttonStyle(DesignButtonStyle(kind: .bordered, height: 28, padding: 10))
-                    .help("Copy the instructions for an agent and this session's id. Paste them into an agent and add your question.")
-                Spacer()
-                SmallIconButton(symbol: "doc.text", help: "Show the transcript in Finder", size: 28, fill: Theme.bg) { model.revealTranscript(s) }
-                SmallIconButton(symbol: "folder", help: "Open the project folder", size: 28, fill: Theme.bg) { model.openProjectFolder(s) }
-                SmallIconButton(symbol: "number", help: "Copy the session id", size: 28, fill: Theme.bg) { model.copy(s.id) }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Theme.bg)
-        }
-    }
-
-    // MARK: Window
 
     private var overview: some View {
         let s = session
@@ -240,18 +141,6 @@ struct SessionDetailView: View {
         return f
     }()
 
-    private func metaLine(_ s: Session) -> String {
-        var parts = [s.projectName]
-        if let b = s.gitBranch { parts.append(b) }
-        let last = "last activity \(Format.ago(s.lastActivity, now: model.now))"
-        if let t = s.startedAt {
-            parts.append("started \(t.formatted(date: .omitted, time: .shortened)), \(last)")
-        } else {
-            parts.append(last)
-        }
-        return parts.joined(separator: " · ")
-    }
-
     private func promptsLine(_ s: Session) -> String {
         "\(s.prompts) typed, \(s.usage.requests) model calls, \(s.subagents) subagent\(s.subagents == 1 ? "" : "s")"
     }
@@ -273,69 +162,6 @@ struct SessionDetailView: View {
 
     private func limitShare(_ s: Session) -> String? {
         Plan.limitShare(costMicros: s.costMicros, weeklyBudgetMicros: model.plan.weeklyBudgetMicros)
-    }
-}
-
-/// A green "Active" label.
-struct ActivePill: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(Theme.ok).frame(width: 6, height: 6)
-            Text("Active")
-        }
-        .font(.ui(11, .medium))
-        .foregroundStyle(Theme.ok)
-        .padding(.horizontal, 8)
-        .frame(height: 20)
-        .background(Theme.ok.opacity(0.10), in: Capsule())
-    }
-}
-
-/// The biggest saving from the Spend tab, as a link to it. Loads the
-/// session's anatomy when shown.
-struct TopTipLink: View {
-    @Environment(AppModel.self) private var model
-    let session: Session
-
-    var body: some View {
-        Group {
-            if case let .loaded(a, _) = model.anatomies[session.id], let tip = Self.best(a.spend.tips) {
-                Button { model.openWindow?(session.id, .spend) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "lightbulb").font(.system(size: 16)).foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(headline(tip)).font(.ui(13, .semibold)).lineLimit(1)
-                            Text(more(a.spend.tips.count)).font(.ui(12)).foregroundStyle(Theme.text2).lineLimit(2)
-                        }
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent)
-                    }
-                    .foregroundStyle(Theme.text)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.accent.opacity(0.18)))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(tip.detail)
-            }
-        }
-        .task(id: "\(session.id) \(session.modifiedAt.timeIntervalSince1970)") { model.loadAnatomy(session) }
-    }
-
-    static func best(_ tips: [Tip]) -> Tip? {
-        tips.max { ($0.savingMicros ?? 0, $0.costMicros) < ($1.savingMicros ?? 0, $1.costMicros) }
-    }
-
-    private func headline(_ tip: Tip) -> String {
-        if let s = tip.savingMicros, s > 0 { return "Save up to \(Format.dollars(s)): \(tip.title)" }
-        return tip.title
-    }
-
-    private func more(_ count: Int) -> String {
-        count > 1 ? "\(count - 1) more tip\(count == 2 ? "" : "s") in Spend." : "Details in Spend."
     }
 }
 
