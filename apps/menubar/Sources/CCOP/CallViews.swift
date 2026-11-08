@@ -100,6 +100,7 @@ struct CallSheet: View {
         }
         .padding(16)
         .frame(minWidth: 720, idealWidth: 920, minHeight: 480, idealHeight: 720)
+        .closesOnClickOutside { dismiss() }
         .task {
             guard let id = e.toolUseId else { call = .failed("This call has no id in the transcript."); return }
             switch await model.call(sessionID, toolUseID: id) {
@@ -129,6 +130,55 @@ struct CallSheet: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.07)))
             if cut { Text("Shown: the first \(Self.shownChars) characters. Copy copies all of it.").font(.caption).foregroundStyle(.secondary) }
             if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+}
+
+extension View {
+    /// In a sheet: a click on the window under the sheet closes it. A macOS
+    /// sheet does not close by itself; the click would only beep.
+    func closesOnClickOutside(_ close: @escaping () -> Void) -> some View {
+        background(OutsideClickWatcher(close: close))
+    }
+}
+
+private struct OutsideClickWatcher: NSViewRepresentable {
+    let close: () -> Void
+
+    func makeNSView(context: Context) -> WatcherView {
+        let v = WatcherView()
+        v.close = close
+        return v
+    }
+
+    func updateNSView(_ v: WatcherView, context: Context) {
+        v.close = close
+    }
+
+    final class WatcherView: NSView {
+        var close: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                // Only a click on the window this sheet is attached to; other windows work as before.
+                guard let self, let sheet = self.window, let parent = sheet.sheetParent, event.window === parent else { return event }
+                self.close?()
+                return nil
+            }
+        }
+
+        private func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        override func removeFromSuperview() {
+            stop()
+            super.removeFromSuperview()
         }
     }
 }
