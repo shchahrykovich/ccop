@@ -143,6 +143,25 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(Plan.hue(ofAllowance: -1), 1.0 / 3, accuracy: 1e-9)
     }
 
+    func testEveryLitBlockOfTheBatteryHasTheColorOfTheLevel() {
+        // Nothing used: no block is lit.
+        XCTAssertEqual(Plan.batteryLevel(used: 0, rows: 5).lit, 0)
+        // Any use lights one block, and it is green.
+        let one = Plan.batteryLevel(used: 0.01, rows: 5)
+        XCTAssertEqual(one.lit, 1)
+        XCTAssertEqual(one.hue, 1.0 / 3, accuracy: 1e-9)
+        // Half: 3 of 5 blocks, all yellow.
+        let half = Plan.batteryLevel(used: 0.5, rows: 5)
+        XCTAssertEqual(half.lit, 3)
+        XCTAssertEqual(half.hue, 1.0 / 6, accuracy: 1e-9)
+        // Full or over: 5 blocks, all red.
+        let full = Plan.batteryLevel(used: 1.4, rows: 5)
+        XCTAssertEqual(full.lit, 5)
+        XCTAssertEqual(full.hue, 0, accuracy: 1e-9)
+        // A broken number counts as full.
+        XCTAssertEqual(Plan.batteryLevel(used: .nan, rows: 5).lit, 5)
+    }
+
     func testWithoutALimitThereIsNoShare() throws {
         let settings = PlanSettings(resetAnchor: d("2026-10-29T10:00:00Z"))
         let report = UsageReport(generatedAt: d("2026-11-02T20:00:00Z"), hours: hours(from: "2026-11-02T00:00:00Z", count: 2))

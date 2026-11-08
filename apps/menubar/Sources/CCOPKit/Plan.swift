@@ -397,6 +397,17 @@ public enum Plan {
     public static func hue(ofAllowance fraction: Double) -> Double {
         (1 - min(1, max(0, fraction))) / 3
     }
+
+    /// One half of the menu bar battery: how many of `rows` blocks are lit for
+    /// the used part (0...1, more is full, any use lights one, a broken number
+    /// is full), and the one hue of every lit block: green with one block,
+    /// red with all of them.
+    public static func batteryLevel(used: Double, rows: Int) -> (lit: Int, hue: Double) {
+        let u = used.isFinite ? max(0, used) : 1
+        let lit = u <= 0 ? 0 : max(1, min(rows, Int((u * Double(rows)).rounded())))
+        let level = rows > 1 ? Double(max(0, lit - 1)) / Double(rows - 1) : 1
+        return (lit, hue(ofAllowance: level))
+    }
 }
 
 public extension Format {

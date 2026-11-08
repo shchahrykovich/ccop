@@ -93,7 +93,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// A standing battery split by a diagonal line: the left half is today,
     /// the right half the week. Each half has 5 blocks that light up from the
     /// bottom with the used part (0...1, more is full; any use lights one).
-    /// The colour goes by height: green at the bottom, red at the top. The
+    /// Every lit block of a half has one colour, by how many are lit: green
+    /// with one, red with all five (`Plan.batteryLevel`). The
     /// outline uses the menu bar's text colour, read when the image is drawn.
     /// `dark`: a near-black body, for a local build, so it can be told from
     /// the release when both run.
@@ -126,14 +127,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             let rowGap: CGFloat = 1
             let rowHeight = (inner.height - rowGap * CGFloat(rows - 1)) / CGFloat(rows)
             for (half, used) in [(left, today), (right, week)] {
-                let u = used.isFinite ? max(0, used) : 1
-                let lit = u <= 0 ? 0 : max(1, min(rows, Int((u * Double(rows)).rounded())))
+                let (lit, hue) = Plan.batteryLevel(used: used, rows: rows)
+                let color = NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1)
                 for row in 0 ..< rows {
                     NSGraphicsContext.saveGraphicsState()
                     half.addClip()
-                    // Green (hue 1/3) at the bottom to red (0) at the top.
-                    let hue = (1.0 / 3) * (1 - Double(row) / Double(rows - 1))
-                    (row < lit ? NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1) : unlit).setFill()
+                    (row < lit ? color : unlit).setFill()
                     NSRect(x: inner.minX, y: inner.minY + CGFloat(row) * (rowHeight + rowGap),
                            width: inner.width, height: rowHeight).fill()
                     NSGraphicsContext.restoreGraphicsState()
