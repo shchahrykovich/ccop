@@ -90,7 +90,8 @@ struct SidebarView: View {
             .titleBarArea()
             VStack(alignment: .leading, spacing: 10) {
                 PlanCards(compact: true)
-                Segmented(options: SidebarMode.allCases.map { ($0, $0.title) }, selection: $model.sidebarMode, height: 24)
+                Segmented(options: SidebarMode.allCases.map { ($0, $0.title) }, selection: $model.sidebarMode, height: 24,
+                          symbol: { $0.symbol })
                     .accessibilityLabel("List")
                 Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)
                     .accessibilityLabel("Period")
@@ -549,5 +550,14 @@ struct SidebarRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(selected ? Theme.accent : .clear, in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private extension SidebarMode {
+    var symbol: String {
+        switch self {
+        case .sessions: "list.bullet.rectangle"
+        case .tools: "wrench.and.screwdriver"
+        }
     }
 }

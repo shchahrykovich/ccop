@@ -296,19 +296,29 @@ struct Segmented<Value: Hashable>: View {
     var height: CGFloat = 22
     var equalWidths = true
     var radius: CGFloat = 7
+    /// An SF Symbol before an option's title; nil: none.
+    var symbol: (Value) -> String? = { _ in nil }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.value) { option in
                 let on = option.value == selection
                 Button { selection = option.value } label: {
-                    Text(option.title)
-                        .font(.ui(12, on ? .medium : .regular))
-                        .foregroundStyle(Theme.text)
-                        .padding(.horizontal, equalWidths ? 0 : 12)
-                        .frame(maxWidth: equalWidths ? .infinity : nil)
-                        .frame(height: height)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 5) {
+                        if let name = symbol(option.value) {
+                            Image(systemName: name)
+                                .font(.ui(11, on ? .semibold : .regular))
+                                .foregroundStyle(on ? Theme.text : Theme.text2)
+                                .accessibilityHidden(true)
+                        }
+                        Text(option.title)
+                    }
+                    .font(.ui(12, on ? .medium : .regular))
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, equalWidths ? 0 : 12)
+                    .frame(maxWidth: equalWidths ? .infinity : nil)
+                    .frame(height: height)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background {
