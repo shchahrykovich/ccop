@@ -23,6 +23,15 @@ To keep a session easy to find, right-click it in the list and choose **Flag**. 
 
 Flags stay on this Mac, in the settings of the app. The `ccop` command does not know about them.
 
+## Tools and MCP servers
+
+In the window, choose **Tools** at the top of the list. The list then shows the MCP servers and Claude Code's own tools of the sessions that the period, the search and the folder filter keep, with their cost and the number of sessions that called them.
+
+- **All tools** shows a table: which project uses which tool or server, with the cost and the number of sessions in each cell.
+- A server or a tool shows its tools, its cost by project, and each session that called it. Click a session to open it at its Cause tab.
+
+The cost of a tool is the cost of the model calls that read its results, not the price of running it.
+
 ## Commands
 
 All commands take `--json`. `ID` is the start of a session id.
@@ -36,6 +45,7 @@ All commands take `--json`. `ID` is the start of a session id.
 | `ccop brief ID` | A short report on one session |
 | `ccop brief --since 7d` | A short report on many sessions |
 | `ccop top commands --since 7d` | A list of commands, causes, agents, sessions, turns, errors, projects or tips |
+| `ccop tools --since 7d` | MCP servers and tools: cost, calls, sessions, projects |
 | `ccop cause ID Bash` | The costliest calls of a tool or a program |
 | `ccop time ID` | Where the clock went: model, tools, subagents, waiting |
 | `ccop anatomy ID` | Everything about one session: turns, lanes, tools, tips |

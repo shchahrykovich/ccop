@@ -62,7 +62,9 @@ struct WindowRootView: View {
         HStack(spacing: 0) {
             SidebarView(selectedID: model.windowSelected?.id) { model.chooseInWindow($0) }
             Group {
-                if let s = model.windowShown {
+                if model.sidebarMode == .tools {
+                    ToolsPage()
+                } else if let s = model.windowShown {
                     WindowDetail(session: s)
                 } else {
                     Text("Choose a session").foregroundStyle(Theme.text3).frame(maxWidth: .infinity, maxHeight: .infinity)

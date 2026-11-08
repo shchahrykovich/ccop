@@ -11,20 +11,49 @@ final class AppModel {
     private(set) var loading = false
     private(set) var error: String?
     private(set) var loadedAt: Date?
-    var query = ""
+    var query = "" {
+        didSet { updateToolsData() }
+    }
     /// Saved on each change, so a new launch shows the same period.
     var period = Period.load() {
-        didSet { period.save() }
+        didSet {
+            period.save()
+            if period != oldValue { loadToolsIfShown() }
+            updateToolsData()
+        }
     }
     /// The project folder the list shows (alone or with its subfolders); nil for all folders.
     /// Saved on each change, so a new launch shows the same folder.
     var folder = FolderScope.load() {
-        didSet { FolderScope.save(folder) }
+        didSet {
+            FolderScope.save(folder)
+            updateToolsData()
+        }
     }
     /// The ids of the flagged sessions; saved on each change.
     var flagged = SessionFlags.load() {
-        didSet { SessionFlags.save(flagged) }
+        didSet {
+            SessionFlags.save(flagged)
+            updateToolsData()
+        }
     }
+    /// The window's list: sessions, or tools and MCP servers. Saved on each change.
+    var sidebarMode = SidebarMode.load() {
+        didSet {
+            sidebarMode.save()
+            if sidebarMode != oldValue { loadToolsIfShown() }
+        }
+    }
+    /// What the Tools mode shows.
+    var toolPick = ToolPick.all
+    /// The last `ccop tools` read, for the period it was read for.
+    private(set) var toolsReport: (report: ToolsReport, period: Period, at: Date)?
+    /// `toolsReport` added up for the sessions the list shows.
+    private(set) var toolsData: ToolsData?
+    private(set) var toolsLoading = false
+    private(set) var toolsError: String?
+    /// A refresh reads the tools again at most this often: a read of all sessions takes seconds.
+    static let toolsInterval: TimeInterval = 120
     var now = Date()
     var popoverOpen = false {
         didSet { if popoverOpen, !oldValue, !paused { refresh() } }
@@ -35,6 +64,7 @@ final class AppModel {
             if windowOpen, !oldValue {
                 showLatestInWindow()
                 if !paused { refresh() }
+                loadToolsIfShown()
             }
         }
     }
@@ -227,6 +257,8 @@ final class AppModel {
                     self.error = nil
                     self.loadedAt = Date()
                     self.followListInWindow()
+                    self.updateToolsData()
+                    if let at = self.toolsReport?.at, Date().timeIntervalSince(at) >= Self.toolsInterval { self.loadToolsIfShown() }
                 case let .failure(e):
                     self.error = e.localizedDescription
                 }
@@ -240,6 +272,65 @@ final class AppModel {
                 if self.pendingCalibration, case .success = usage { self.refresh() }
             }
         }
+    }
+
+    /// Reads the tools when the window shows the Tools mode and the last read
+    /// is of another period (or there is none).
+    func loadToolsIfShown() {
+        guard windowOpen, sidebarMode == .tools else { return }
+        if let r = toolsReport, r.period == period, Date().timeIntervalSince(r.at) < Self.toolsInterval { return }
+        loadTools()
+    }
+
+    /// Reads `ccop tools` for the period; the old data stays shown until the new is in.
+    func loadTools() {
+        guard !toolsLoading else { return }
+        guard let source else {
+            toolsError = SessionSourceError.cliNotFound.localizedDescription
+            return
+        }
+        toolsLoading = true
+        let period = period
+        let since = period.cliSince(now: Date())
+        Task.detached(priority: .userInitiated) {
+            let started = Date()
+            let result = Result { try source.tools(since: since) }
+            await MainActor.run {
+                self.toolsLoading = false
+                switch result {
+                case let .success(report):
+                    self.toolsReport = (report, period, started)
+                    self.toolsError = nil
+                    self.updateToolsData()
+                case let .failure(e):
+                    self.toolsError = e.localizedDescription
+                }
+                // The period changed while it read.
+                if self.period != period { self.loadToolsIfShown() }
+            }
+        }
+    }
+
+    /// Adds the tools up again for the sessions the list shows now.
+    private func updateToolsData() {
+        guard let r = toolsReport else {
+            toolsData = nil
+            return
+        }
+        // A report of another period would count sessions the list does not show, or miss some.
+        guard r.period == period else {
+            toolsData = nil
+            return
+        }
+        toolsData = ToolsData(report: r.report, keep: Set(visible.map(\.id)))
+    }
+
+    /// A session of the Tools mode, opened at its Cause tab on one tool.
+    func openToolInSession(_ sessionID: String, tool: String) {
+        sidebarMode = .sessions
+        windowSelectedID = sessionID
+        causeID = "tool \(tool)"
+        windowTab = .cause
     }
 
     var visible: [Session] {

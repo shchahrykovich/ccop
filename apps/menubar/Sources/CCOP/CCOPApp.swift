@@ -47,5 +47,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 controller.openWindow(session: id, tab: tab)
             }
         }
+        // For development: `CCOP --tools [all|<server>|<tool name>] [today|week|month|all|flagged]`:
+        // the window in Tools mode, at all tools, an MCP server or a tool.
+        if let i = CommandLine.arguments.firstIndex(of: "--tools") {
+            let rest = Array(CommandLine.arguments.dropFirst(i + 1))
+            let name = rest.first.flatMap { $0.hasPrefix("-") ? nil : $0 }
+            if let period = rest.dropFirst().first.flatMap(Period.init(rawValue:)) { model.period = period }
+            model.sidebarMode = .tools
+            switch name {
+            case nil, "all": model.toolPick = .all
+            case let n? where n.hasPrefix("mcp__") || !n.allSatisfy({ $0.isLowercase || $0 == "-" || $0 == "_" }): model.toolPick = .tool(n)
+            case let n?: model.toolPick = .server(n)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { controller.openWindow(session: nil, tab: nil) }
+        }
     }
 }

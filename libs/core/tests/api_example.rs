@@ -75,3 +75,45 @@ fn the_anatomy_example_is_what_the_code_makes() {
     let saved = std::fs::read_to_string(path).expect("run with UPDATE_EXAMPLES=1 to write api/anatomy.example.json");
     assert_eq!(saved, text, "api/anatomy.example.json is out of date: run with UPDATE_EXAMPLES=1 and update the Swift types");
 }
+
+/// `api/tools.example.json` is `ccop tools --json` for two small sessions.
+/// Run with UPDATE_EXAMPLES=1 to write it again after a change to the types.
+#[test]
+fn the_tools_example_is_what_the_code_makes() {
+    use ccop_core::anatomy::{LaneReader, build};
+    use ccop_core::tools::ToolUses;
+    use serde_json::json;
+    let sessions: Vec<Session> = serde_json::from_str(include_str!("../../../api/sessions.example.json")).unwrap();
+    let anatomy = |id: &str, tools: &[(&str, bool)]| {
+        let mut r = LaneReader::main();
+        r.feed(&json!({"type": "user", "timestamp": "2026-11-02T10:00:00Z", "message": {"content": "go"}}).to_string());
+        for (i, (name, error)) in tools.iter().enumerate() {
+            r.feed(
+                &json!({"type": "assistant", "requestId": format!("r{i}"), "timestamp": format!("2026-11-02T10:0{i}:01Z"),
+                    "message": {"id": format!("m{i}"), "model": "claude-opus-5-5", "content": [{"type": "tool_use", "id": format!("t{i}"), "name": name, "input": {}}],
+                                "usage": {"input_tokens": 1, "cache_read_input_tokens": 1000, "output_tokens": 20}}})
+                .to_string(),
+            );
+            r.feed(
+                &json!({"type": "user", "timestamp": format!("2026-11-02T10:0{i}:03Z"),
+                    "message": {"content": [{"type": "tool_result", "tool_use_id": format!("t{i}"), "content": "ok", "is_error": error}]}})
+                .to_string(),
+            );
+        }
+        r.feed(
+            &json!({"type": "assistant", "requestId": "rl", "timestamp": "2026-11-02T10:09:00Z",
+                "message": {"id": "ml", "model": "claude-opus-5-5", "content": [], "usage": {"input_tokens": 1, "cache_read_input_tokens": 1000, "output_tokens": 5}}})
+            .to_string(),
+        );
+        build(id, r.finish(), Vec::new())
+    };
+    let mut all = ToolUses::of(&sessions[0], &anatomy(&sessions[0].id, &[("Bash", false), ("mcp__wiki__get_page", false), ("mcp__wiki__search", true)]));
+    all.merge(ToolUses::of(&sessions[1], &anatomy(&sessions[1].id, &[("Bash", true), ("mcp__plugin_box_box__open", false)])));
+    let text = serde_json::to_string_pretty(&all.report()).unwrap() + "\n";
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../api/tools.example.json");
+    if std::env::var_os("UPDATE_EXAMPLES").is_some() {
+        std::fs::write(path, &text).unwrap();
+    }
+    let saved = std::fs::read_to_string(path).expect("run with UPDATE_EXAMPLES=1 to write api/tools.example.json");
+    assert_eq!(saved, text, "api/tools.example.json is out of date: run with UPDATE_EXAMPLES=1 and update the Swift types");
+}

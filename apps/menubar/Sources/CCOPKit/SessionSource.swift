@@ -15,6 +15,12 @@ public protocol SessionSource: Sendable {
     func usage(days: Int) throws -> UsageReport
     /// The instructions for agents: `ccop guide`.
     func guide() throws -> String
+    /// The tools of each session active in a period: `ccop tools --since <since> --json`.
+    func tools(since: String) throws -> ToolsReport
+}
+
+public extension SessionSource {
+    func tools(since: String) throws -> ToolsReport { throw SessionSourceError.cliNotFound }
 }
 
 public enum SessionSourceError: Error, LocalizedError, Equatable {
@@ -73,6 +79,10 @@ public struct CLISessionSource: SessionSource {
 
     public func usage(days: Int) throws -> UsageReport {
         try UsageReport.decode(run(["usage", "--json", "--days", String(days)]))
+    }
+
+    public func tools(since: String) throws -> ToolsReport {
+        try ToolsReport.decode(run(["tools", "--json", "--since", since]))
     }
 
     public func guide() throws -> String {

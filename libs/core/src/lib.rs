@@ -10,6 +10,7 @@ pub mod rollup;
 pub mod session;
 pub mod spend;
 pub mod timing;
+pub mod tools;
 pub mod transcript;
 pub mod usage;
 

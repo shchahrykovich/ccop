@@ -14,6 +14,7 @@ use crate::Session;
 use crate::anatomy::Anatomy;
 use crate::spend::{CallCost, Cause, CauseKind, ERROR_KEY_CHARS, TipKind};
 use crate::timing::{clock_by_name, tool_name};
+use crate::tools::ToolUses;
 
 /// The longest name kept in a row: a prompt or an error can be long.
 pub const NAME_CHARS: usize = 200;
@@ -184,6 +185,8 @@ pub struct Rollup {
     projects: BTreeMap<String, Acc>,
     tip_kinds: BTreeMap<TipKind, Acc>,
     tips: Vec<Acc>,
+    /// Each session's tools, for `ccop tools`.
+    pub tools: ToolUses,
 }
 
 fn tip_kind_name(kind: TipKind) -> &'static str {
@@ -215,6 +218,7 @@ impl Rollup {
             subagents: a.lanes.len().saturating_sub(1) as u64,
             wall_ms,
             only: Some((s.id.clone(), s.title.clone(), s.project_dir.clone())),
+            tools: ToolUses::of(s, a),
             ..Rollup::default()
         };
         let tool_ms = clock_by_name(a, |e| Some(tool_name(e)));
@@ -358,6 +362,7 @@ impl Rollup {
         self.session_rows.extend(o.session_rows);
         self.turns.extend(o.turns);
         self.tips.extend(o.tips);
+        self.tools.merge(o.tools);
     }
 
     /// All rows of one kind, the most cost (or time) first.

@@ -1,0 +1,75 @@
+{
+  "sessions": [
+    {
+      "id": "3f0c2a71-5b8e-4d6a-9c1e-7a2b4c6d8e90",
+      "title": "Cart checkout feature",
+      "project_dir": "/Users/me/shop",
+      "cost_micros": 2116
+    },
+    {
+      "id": "5e7a9c1b-2d4f-4a6b-8c0e-1f3a5b7c9d02",
+      "title": "(no prompt)",
+      "project_dir": "-Users-me-old",
+      "cost_micros": 1512
+    }
+  ],
+  "tools": [
+    {
+      "name": "Bash"
+    },
+    {
+      "name": "mcp__plugin_box_box__open",
+      "server": "plugin_box_box"
+    },
+    {
+      "name": "mcp__wiki__get_page",
+      "server": "wiki"
+    },
+    {
+      "name": "mcp__wiki__search",
+      "server": "wiki"
+    }
+  ],
+  "uses": [
+    {
+      "session": 0,
+      "tool": 0,
+      "cost_micros": 604,
+      "calls": 1,
+      "errors": 0,
+      "ms": 2000
+    },
+    {
+      "session": 0,
+      "tool": 2,
+      "cost_micros": 604,
+      "calls": 1,
+      "errors": 0,
+      "ms": 2000
+    },
+    {
+      "session": 0,
+      "tool": 3,
+      "cost_micros": 304,
+      "calls": 1,
+      "errors": 1,
+      "ms": 2000
+    },
+    {
+      "session": 1,
+      "tool": 0,
+      "cost_micros": 604,
+      "calls": 1,
+      "errors": 1,
+      "ms": 2000
+    },
+    {
+      "session": 1,
+      "tool": 1,
+      "cost_micros": 304,
+      "calls": 1,
+      "errors": 0,
+      "ms": 2000
+    }
+  ]
+}

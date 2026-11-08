@@ -90,6 +90,8 @@ struct SidebarView: View {
             .titleBarArea()
             VStack(alignment: .leading, spacing: 10) {
                 PlanCards(compact: true)
+                Segmented(options: SidebarMode.allCases.map { ($0, $0.title) }, selection: $model.sidebarMode, height: 24)
+                    .accessibilityLabel("List")
                 Segmented(options: Period.allCases.map { ($0, $0.title) }, selection: $model.period)
                     .accessibilityLabel("Period")
                 SearchField(placeholder: "Search", text: $model.query, iconSize: 12) {
@@ -110,7 +112,9 @@ struct SidebarView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             Rectangle().fill(Theme.line).frame(height: 1)
-            if visible.isEmpty {
+            if model.sidebarMode == .tools {
+                ToolsSidebarList()
+            } else if visible.isEmpty {
                 EmptyList()
             } else {
                 ScrollView {

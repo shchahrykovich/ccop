@@ -10,6 +10,7 @@ use ccop_core::rollup::{Brief, By, CauseReport, Rollup, Row, What};
 use ccop_core::short;
 use ccop_core::spend::dollars;
 use ccop_core::timing::Timing;
+use ccop_core::tools::{ToolRow, ToolUses};
 use serde::Serialize;
 
 use crate::{cut, duration};
@@ -276,6 +277,75 @@ pub fn context(session: &str, c: &Contents, total_rows: usize) -> String {
         let _ = writeln!(out, "{} more: --limit", total_rows - c.rows.len());
     }
     let _ = writeln!(out, "NEXT: ccop context {} --call N (another call), --each (each read on its own), ccop call {} TOOL_USE_ID --max-bytes 4000 (with --json)", id8(session), id8(session));
+    out
+}
+
+/// `ccop tools`: MCP servers, then tools, the most cost first; with a
+/// server, its tools and the sessions that called it.
+pub fn tools(t: &ToolUses, server: Option<&str>, limit: usize) -> String {
+    let mut out = String::new();
+    let (mcp, two) = t.mcp_sessions();
+    let _ = writeln!(
+        out,
+        "{} sessions, {} in all. {mcp} called an MCP server, {two} of them two servers or more.",
+        t.session_count(),
+        dollars(t.cost_micros())
+    );
+    let total = t.cost_micros().max(1) as f64;
+    let block = |out: &mut String, title: &str, rows: &[ToolRow], unit: &str| {
+        if rows.is_empty() {
+            return;
+        }
+        let _ = writeln!(out, "{title} ({} of {}, most cost first)", rows.len().min(limit), rows.len());
+        for r in rows.iter().take(limit) {
+            let mut line = format!(
+                "  {:<34}  {:>8}  {:>3.0}%  {} calls  in {} session{}",
+                cut(&r.name, 34),
+                dollars(r.cost_micros),
+                r.cost_micros as f64 * 100.0 / total,
+                r.calls,
+                r.sessions,
+                if r.sessions == 1 { "" } else { "s" }
+            );
+            if unit == "server" {
+                let _ = write!(line, "  {} tools", r.tools);
+            }
+            if r.errors > 0 {
+                let _ = write!(line, "  {} err", r.errors);
+            }
+            let _ = writeln!(out, "{line}");
+            let projects: Vec<String> = r.projects.iter().take(3).map(|(p, c)| format!("{p} {}", dollars(*c))).collect();
+            let more = r.projects.len().saturating_sub(3);
+            let _ = writeln!(out, "      {}{}", projects.join(", "), if more > 0 { format!(" and {more} more projects") } else { String::new() });
+        }
+    };
+    match server {
+        Some(s) => {
+            block(&mut out, &format!("TOOLS OF {s}"), &t.summary(false, Some(s)), "tool");
+            let sessions = t.sessions_of(Some(s), None);
+            if !sessions.is_empty() {
+                let _ = writeln!(out, "SESSIONS ({} of {})", sessions.len().min(limit), sessions.len());
+                for (session, cost, calls, errors) in sessions.iter().take(limit) {
+                    let share = *cost as f64 * 100.0 / session.cost_micros.max(1) as f64;
+                    let _ = writeln!(
+                        out,
+                        "  {:>8}  {:>3.0}% of the session  {calls} calls{}  {}",
+                        dollars(*cost),
+                        share,
+                        if *errors > 0 { format!("  {errors} err") } else { String::new() },
+                        cut(&session.title, 50)
+                    );
+                    let _ = writeln!(out, "      {} {}", id8(&session.id), session.project_dir.rsplit('/').next().unwrap_or(""));
+                }
+                let _ = writeln!(out, "NEXT: ccop cause SESSION_ID TOOL_NAME");
+            }
+        }
+        None => {
+            block(&mut out, "MCP SERVERS", &t.summary(true, None), "server");
+            block(&mut out, "TOOLS", &t.summary(false, None), "tool");
+            let _ = writeln!(out, "NEXT: ccop tools --server NAME (the sessions that called it)");
+        }
+    }
     out
 }
 

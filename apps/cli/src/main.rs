@@ -98,6 +98,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Which tools and MCP servers the sessions used: cost, calls, sessions
+    /// and projects of each. All sessions of a period (7 days unless --since
+    /// says otherwise). The app reads the JSON.
+    Tools {
+        #[command(flatten)]
+        filter: Filter,
+        /// Only this MCP server (the middle part of `mcp__<server>__<tool>`):
+        /// its tools and the sessions that called it.
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// One row per session and tool (what the app reads).
+        #[arg(long)]
+        json: bool,
+    },
     /// The costliest calls behind one cause of a session: a tool (`Bash`), a
     /// program (`sed`), `prompts`, `tasks`, `reports`, `compaction` or `other`.
     Cause {
@@ -331,6 +347,16 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&report::TopOut { what, by, sessions: rollup.sessions, cost_micros: rollup.cost_micros, total_rows: total, rows })?);
             } else {
                 print!("{}", report::top(what, by, &rollup, &rows, total));
+                report::note_unreadable(unreadable);
+            }
+        }
+        Command::Tools { filter, server, limit, json } => {
+            let list = chosen(&scan.sessions, None, filter, now)?;
+            let (rollup, unreadable) = anatomy::rollup(&list);
+            if json {
+                println!("{}", serde_json::to_string(&rollup.tools.report())?);
+            } else {
+                print!("{}", report::tools(&rollup.tools, server.as_deref(), limit));
                 report::note_unreadable(unreadable);
             }
         }
