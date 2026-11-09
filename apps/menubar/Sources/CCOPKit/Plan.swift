@@ -116,6 +116,9 @@ public struct DayStatus: Equatable, Sendable, Identifiable {
     public var id: Date { start }
 }
 
+/// The colour of the week: `Plan.weekTone`.
+public enum WeekTone: Equatable, Sendable { case ok, warn, bad }
+
 public struct WeekStatus: Equatable, Sendable {
     public var weekStart: Date
     public var weekEnd: Date
@@ -129,6 +132,11 @@ public struct WeekStatus: Equatable, Sendable {
     /// The used part of the weekly limit; nil without a limit.
     public var usedFraction: Double? {
         budgetMicros.flatMap { $0 == 0 ? nil : Double(usedMicros) / Double($0) }
+    }
+
+    /// The colour of the week; nil without a limit.
+    public var tone: WeekTone? {
+        usedFraction.map { Plan.weekTone(used: $0, elapsed: elapsedFraction) }
     }
 
     /// 1/7 of the weekly limit.
@@ -400,13 +408,20 @@ public enum Plan {
 
     /// One half of the menu bar battery: how many of `rows` blocks are lit for
     /// the used part (0...1, more is full, any use lights one, a broken number
-    /// is full), and the one hue of every lit block: green with one block,
-    /// red with all of them.
-    public static func batteryLevel(used: Double, rows: Int) -> (lit: Int, hue: Double) {
+    /// is full). The colour is not from the count: it is the colour of the
+    /// card in the popover (`hue(ofAllowance:)` for today, `weekTone` for the week).
+    public static func batteryBlocks(used: Double, rows: Int) -> Int {
         let u = used.isFinite ? max(0, used) : 1
-        let lit = u <= 0 ? 0 : max(1, min(rows, Int((u * Double(rows)).rounded())))
-        let level = rows > 1 ? Double(max(0, lit - 1)) / Double(rows - 1) : 1
-        return (lit, hue(ofAllowance: level))
+        return u <= 0 ? 0 : max(1, min(rows, Int((u * Double(rows)).rounded())))
+    }
+
+    /// How the week stands: the colour of the Week card and of the battery's
+    /// right half. Red from 90% of the limit; orange when more of the limit is
+    /// used than of the week has passed; green otherwise.
+    public static func weekTone(used: Double, elapsed: Double) -> WeekTone {
+        if used >= 0.9 { return .bad }
+        if used > elapsed { return .warn }
+        return .ok
     }
 }
 

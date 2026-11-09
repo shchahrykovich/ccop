@@ -8,9 +8,14 @@ import SwiftUI
 /// still reads in grey.
 enum Theme {
     static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(nsColor: nsDynamic(light, dark))
+    }
+
+    /// The AppKit form of `dynamic`, for drawing in an image (the menu bar battery).
+    static func nsDynamic(_ light: UInt32, _ dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(rgb: dark) : NSColor(rgb: light)
-        })
+        }
     }
 
     /// Black in light mode and white in dark mode, at two opacities.
@@ -28,9 +33,21 @@ enum Theme {
     static let output = dynamic(0x6D28D9, 0xA685F2)
 
     // Status.
-    static let ok = dynamic(0x1E8E4E, 0x3CCB7F)
-    static let warn = dynamic(0xB26B00, 0xF2B13B)
-    static let bad = dynamic(0xD23B2E, 0xFF6B5E)
+    static let nsOk = nsDynamic(0x1E8E4E, 0x3CCB7F)
+    static let nsWarn = nsDynamic(0xB26B00, 0xF2B13B)
+    static let nsBad = nsDynamic(0xD23B2E, 0xFF6B5E)
+    static let ok = Color(nsColor: nsOk)
+    static let warn = Color(nsColor: nsWarn)
+    static let bad = Color(nsColor: nsBad)
+
+    /// The colour of the week, on the Week card and the battery's right half.
+    static func nsWeek(_ tone: WeekTone) -> NSColor {
+        switch tone {
+        case .ok: nsOk
+        case .warn: nsWarn
+        case .bad: nsBad
+        }
+    }
 
     // Text and lines (--text, --text2, --text3, --line, --line2).
     static let text = dynamic(0x1D1D1F, 0xF2F2F4)
@@ -88,7 +105,12 @@ enum Theme {
 
     /// Green under half of the allowance, then to red at the whole of it.
     static func allowance(_ fraction: Double) -> Color {
-        Color(hue: Plan.hue(ofAllowance: fraction), saturation: 0.85, brightness: 0.78)
+        Color(nsColor: nsAllowance(fraction))
+    }
+
+    /// The AppKit form of `allowance`: the Today card and the battery's left half.
+    static func nsAllowance(_ fraction: Double) -> NSColor {
+        NSColor(hue: Plan.hue(ofAllowance: fraction), saturation: 0.85, brightness: 0.78, alpha: 1)
     }
 
     /// `~/code/shop` for `/Users/me/code/shop`.

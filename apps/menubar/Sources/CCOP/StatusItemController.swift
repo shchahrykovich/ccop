@@ -67,7 +67,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // Without a limit: the icon and today's tokens.
         if let week, let today = week.todayOfAllowance {
             button.image = Self.battery(today: week.todayAllowanceMicros == 0 ? 1 : today, week: week.usedFraction ?? 0,
-                                        dark: model.isLocalBuild)
+                                        weekTone: week.tone ?? .ok, dark: model.isLocalBuild)
             button.attributedTitle = NSAttributedString()
             button.imagePosition = .imageOnly
         } else {
@@ -93,12 +93,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// A standing battery split by a diagonal line: the left half is today,
     /// the right half the week. Each half has 5 blocks that light up from the
     /// bottom with the used part (0...1, more is full; any use lights one).
-    /// Every lit block of a half has one colour, by how many are lit: green
-    /// with one, red with all five (`Plan.batteryLevel`). The
+    /// Every lit block of a half has the colour of its card in the popover:
+    /// today by the part of today's allowance, the week by `weekTone`. The
     /// outline uses the menu bar's text colour, read when the image is drawn.
     /// `dark`: a near-black body, for a local build, so it can be told from
     /// the release when both run.
-    static func battery(today: Double, week: Double, dark: Bool = false) -> NSImage {
+    static func battery(today: Double, week: Double, weekTone: WeekTone, dark: Bool = false) -> NSImage {
         let rows = 5
         let image = NSImage(size: NSSize(width: 16, height: 22), flipped: false) { _ in
             let label = NSColor.labelColor
@@ -126,9 +126,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             right.close()
             let rowGap: CGFloat = 1
             let rowHeight = (inner.height - rowGap * CGFloat(rows - 1)) / CGFloat(rows)
-            for (half, used) in [(left, today), (right, week)] {
-                let (lit, hue) = Plan.batteryLevel(used: used, rows: rows)
-                let color = NSColor(hue: hue, saturation: 0.85, brightness: 0.9, alpha: 1)
+            // The dark body takes the colours for a dark background.
+            let appearance = dark ? NSAppearance(named: .darkAqua) : nil
+            func resolved(_ color: NSColor) -> NSColor {
+                guard let appearance else { return color }
+                var out = color
+                appearance.performAsCurrentDrawingAppearance { out = color.usingColorSpace(.sRGB) ?? color }
+                return out
+            }
+            for (half, used, color) in [(left, today, Theme.nsAllowance(today)),
+                                        (right, week, resolved(Theme.nsWeek(weekTone)))] {
+                let lit = Plan.batteryBlocks(used: used, rows: rows)
                 for row in 0 ..< rows {
                     NSGraphicsContext.saveGraphicsState()
                     half.addClip()

@@ -143,23 +143,29 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(Plan.hue(ofAllowance: -1), 1.0 / 3, accuracy: 1e-9)
     }
 
-    func testEveryLitBlockOfTheBatteryHasTheColorOfTheLevel() {
+    func testTheBatteryLightsBlocksByTheUsedPart() {
         // Nothing used: no block is lit.
-        XCTAssertEqual(Plan.batteryLevel(used: 0, rows: 5).lit, 0)
-        // Any use lights one block, and it is green.
-        let one = Plan.batteryLevel(used: 0.01, rows: 5)
-        XCTAssertEqual(one.lit, 1)
-        XCTAssertEqual(one.hue, 1.0 / 3, accuracy: 1e-9)
-        // Half: 3 of 5 blocks, all yellow.
-        let half = Plan.batteryLevel(used: 0.5, rows: 5)
-        XCTAssertEqual(half.lit, 3)
-        XCTAssertEqual(half.hue, 1.0 / 6, accuracy: 1e-9)
-        // Full or over: 5 blocks, all red.
-        let full = Plan.batteryLevel(used: 1.4, rows: 5)
-        XCTAssertEqual(full.lit, 5)
-        XCTAssertEqual(full.hue, 0, accuracy: 1e-9)
+        XCTAssertEqual(Plan.batteryBlocks(used: 0, rows: 5), 0)
+        // Any use lights one block.
+        XCTAssertEqual(Plan.batteryBlocks(used: 0.01, rows: 5), 1)
+        // Half: 3 of 5 blocks.
+        XCTAssertEqual(Plan.batteryBlocks(used: 0.5, rows: 5), 3)
+        // Full or over: 5 blocks.
+        XCTAssertEqual(Plan.batteryBlocks(used: 1.4, rows: 5), 5)
         // A broken number counts as full.
-        XCTAssertEqual(Plan.batteryLevel(used: .nan, rows: 5).lit, 5)
+        XCTAssertEqual(Plan.batteryBlocks(used: .nan, rows: 5), 5)
+    }
+
+    func testTheWeekToneComparesTheUsedPartWithTheTimePassed() {
+        // The screenshot case: 74% used, 79% of the week passed. Green, like the
+        // Week card, even with 4 of 5 blocks lit.
+        XCTAssertEqual(Plan.weekTone(used: 0.74, elapsed: 0.79), .ok)
+        XCTAssertEqual(Plan.weekTone(used: 0.5, elapsed: 0.5), .ok)
+        // Ahead of the time: orange.
+        XCTAssertEqual(Plan.weekTone(used: 0.5, elapsed: 0.3), .warn)
+        // 90% or more: red, even late in the week.
+        XCTAssertEqual(Plan.weekTone(used: 0.9, elapsed: 0.99), .bad)
+        XCTAssertEqual(Plan.weekTone(used: 1.3, elapsed: 0.5), .bad)
     }
 
     func testWithoutALimitThereIsNoShare() throws {

@@ -50,12 +50,7 @@ struct PlanCards: View {
 
     private func weekCard(_ s: WeekStatus) -> some View {
         let used = s.usedFraction
-        let color: Color = switch used {
-        case let u? where u >= 0.9: Theme.bad
-        case let u? where u > s.elapsedFraction: Theme.warn
-        case .some: Theme.ok
-        case nil: Theme.text2
-        }
+        let color = s.tone.map { Color(nsColor: Theme.nsWeek($0)) } ?? Theme.text2
         let reset = s.weekEnd.formatted(.dateTime.weekday(.abbreviated).hour().minute())
         return card(title: "Week", value: used.map(Self.percent) ?? Format.dollars(s.usedMicros), color: color,
                     fill: used ?? 0, ticks: s.dayTicks, today: s.todayOnBar,
