@@ -27,6 +27,7 @@ struct SessionListView: View {
                     PauseButton()
                     RefreshButton()
                     HeaderIconButton(symbol: "macwindow", help: "Open in a window") { model.openWindow?(nil, nil) }
+                    HeaderIconButton(symbol: "gearshape", help: "Settings") { model.openPlanSettings?() }
                 }
                 PlanCards()
                 WeekCompareCard()

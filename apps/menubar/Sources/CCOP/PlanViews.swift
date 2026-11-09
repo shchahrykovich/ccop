@@ -18,7 +18,7 @@ struct PlanCards: View {
                 }
             }
             .buttonStyle(.plain)
-            .help("Plan settings")
+            .help("Settings")
         } else {
             HStack(spacing: 8) {
                 if model.limitsReading {
@@ -231,6 +231,8 @@ struct PlanSettingsView: View {
     @State private var percent = ""
     @State private var message: String?
     @State private var manual = false
+    @State private var keyMode: ApiKeySetting.Mode?
+    @State private var keyDraft = ""
 
     static let size = NSSize(width: 500, height: 760)
 
@@ -319,11 +321,84 @@ struct PlanSettingsView: View {
                 Text("Read when ccop starts, then every hour").font(.ui(12))
             }
             .toggleStyle(.checkbox)
+            apiKeyRow
+        }
+    }
+
+    /// The mode shown: the saved one, or Key while a key is being typed.
+    private var shownKeyMode: Binding<ApiKeySetting.Mode> {
+        Binding(get: { keyMode ?? model.apiKey.mode }, set: { mode in
+            keyMode = mode
+            switch mode {
+            case .shell: model.setApiKey(.shell)
+            case .empty: model.setApiKey(.empty)
+            case .key: break // saved with the key
+            }
+        })
+    }
+
+    private var apiKeyRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("API key").font(.ui(12))
+                Picker("", selection: shownKeyMode) {
+                    Text("From shell").tag(ApiKeySetting.Mode.shell)
+                    Text("Empty").tag(ApiKeySetting.Mode.empty)
+                    Text("Key").tag(ApiKeySetting.Mode.key)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("ANTHROPIC_API_KEY for claude -p /usage")
+                Spacer()
+            }
+            if shownKeyMode.wrappedValue == .key {
+                HStack(spacing: 8) {
+                    SecureField("", text: $keyDraft,
+                                prompt: Text(model.apiKey.mode == .key ? "Saved in the Keychain. Type a new key to change it" : "sk-ant-…"))
+                        .textFieldStyle(.plain)
+                        .font(.mono(11.5))
+                        .padding(.horizontal, 6)
+                        .frame(height: 26)
+                        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.line))
+                        .onSubmit(saveKey)
+                        .accessibilityLabel("Anthropic API key")
+                    Button("Save", action: saveKey)
+                        .buttonStyle(DesignButtonStyle(kind: .bordered, height: 26, padding: 10, fontSize: 12))
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            Text(keyHelp(shownKeyMode.wrappedValue))
+                .font(.ui(11)).foregroundStyle(Theme.text3).lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            if let error = model.apiKeyError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.ui(11)).foregroundStyle(Theme.warn).textSelection(.enabled)
+            }
+        }
+    }
+
+    private func keyHelp(_ mode: ApiKeySetting.Mode) -> String {
+        switch mode {
+        case .shell: "Claude Code gets ANTHROPIC_API_KEY from your shell, if the shell sets it. With an API key, /usage shows only the cost, not the plan limits."
+        case .empty: "ccop runs ANTHROPIC_API_KEY=\"\" claude -p /usage, so Claude Code uses your subscription login."
+        case .key: "ccop runs claude -p /usage with this key. The key is kept in the Keychain."
+        }
+    }
+
+    private func saveKey() {
+        let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        model.setApiKey(.key(key))
+        if model.apiKeyError == nil {
+            keyDraft = ""
+            keyMode = nil
         }
     }
 
     private var readLine: Text {
-        let mono = Text("claude -p /usage").font(.mono(11.5))
+        let mono = Text(LimitsReader.shownCommand(model.apiKey)).font(.mono(11.5))
         if model.limitsReading { return Text("Running ") + mono + Text("…") }
         guard let l = model.limits else { return Text("From ") + mono }
         let t = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
@@ -519,7 +594,7 @@ final class PlanWindowController {
         let w = window ?? {
             let w = NSWindow(contentRect: NSRect(origin: .zero, size: PlanSettingsView.size),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "Plan settings"
+            w.title = "Settings"
             w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView: PlanSettingsView().environment(model))
             w.center()

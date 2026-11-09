@@ -214,7 +214,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let open = NSMenuItem(title: "Open Window", action: #selector(openWindowClicked), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
-        let plan = NSMenuItem(title: "Plan Settings…", action: #selector(planClicked), keyEquivalent: ",")
+        let plan = NSMenuItem(title: "Settings…", action: #selector(planClicked), keyEquivalent: ",")
         plan.target = self
         menu.addItem(plan)
         let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshClicked), keyEquivalent: "r")

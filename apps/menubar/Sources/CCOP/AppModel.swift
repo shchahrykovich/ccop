@@ -171,6 +171,24 @@ final class AppModel {
     var claudePath = UserDefaults.standard.string(forKey: LimitsReader.pathDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(claudePath, forKey: LimitsReader.pathDefaultsKey) }
     }
+    @ObservationIgnored private let apiKeyStore = ApiKeyStore()
+    /// `ANTHROPIC_API_KEY` for `claude -p /usage`: the shell's, empty, or a
+    /// key from the Keychain. Read once at launch.
+    private(set) var apiKey: ApiKeySetting = ApiKeyStore().load()
+    private(set) var apiKeyError: String?
+
+    /// Saves the setting and reads the limits with it.
+    func setApiKey(_ setting: ApiKeySetting) {
+        do {
+            try apiKeyStore.save(setting)
+            apiKey = setting
+            apiKeyError = nil
+            readLimits()
+        } catch {
+            apiKeyError = error.localizedDescription
+        }
+    }
+
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     /// The Team ID this app is signed with; nil for a local (ad-hoc) build.
     @ObservationIgnored private let teamID = Updater.teamIdentifier(of: Bundle.main.bundleURL)
@@ -211,8 +229,9 @@ final class AppModel {
         limitsReading = true
         lastLimitsTry = Date()
         let claudePath = LimitsReader.chosenPath(claudePath)
+        let apiKey = apiKey
         Task.detached(priority: .utility) {
-            let result = Result { try LimitsReader.read(claudePath: claudePath) }
+            let result = Result { try LimitsReader.read(claudePath: claudePath, apiKey: apiKey) }
             await MainActor.run {
                 self.limitsReading = false
                 switch result {

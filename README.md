@@ -17,7 +17,7 @@ It reads the transcript files that Claude Code already writes to `~/.claude/proj
 | Context tab | How the context grew over the session, split into parts (estimated) |
 | Chat tab | The messages of one session, with the tokens and cost of each |
 
-Costs are "API-equivalent": what the same calls would cost at Anthropic API prices. Anthropic does not publish plan limits as numbers. ccop runs `claude -p /usage` when it starts and then every hour, and takes the weekly percent and the reset time from it. From that percent and the cost it measured, it works out the weekly limit in dollars and the share for today. If `claude` is not found, you can type the numbers in Plan settings.
+Costs are "API-equivalent": what the same calls would cost at Anthropic API prices. Anthropic does not publish plan limits as numbers. ccop runs `claude -p /usage` when it starts and then every hour, and takes the weekly percent and the reset time from it. From that percent and the cost it measured, it works out the weekly limit in dollars and the share for today. If `claude` is not found, you can type the numbers in Settings.
 
 ## Ask an agent to look at your sessions
 
@@ -56,7 +56,7 @@ scripts/install.sh --user --launch
 
 Without `--user` it installs to `/Applications`. A build from source is ad-hoc signed: it runs on your Mac, but it does not update itself.
 
-The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for the window, plan settings, Refresh, Help, the command line tool, updates and Quit.
+The app has no Dock icon. Left-click the menu bar item to open the popover. Right-click it for the window, Settings, Refresh, Help, the command line tool, updates and Quit.
 
 ## Updates
 

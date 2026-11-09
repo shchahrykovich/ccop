@@ -198,6 +198,7 @@ public enum LimitsReaderError: Error, LocalizedError, Equatable {
     case unreadable(String)
     case notFound
     case chosenPathMissing(String)
+    case apiKeyUsed
 
     public var errorDescription: String? {
         switch self {
@@ -205,6 +206,7 @@ public enum LimitsReaderError: Error, LocalizedError, Equatable {
         case let .chosenPathMissing(path): "The path you chose for Claude Code is not a program: \(path)"
         case let .failed(why): "Could not run claude -p /usage: \(why)"
         case let .unreadable(text): "claude -p /usage printed no limits: \(text.prefix(200))"
+        case .apiKeyUsed: "Claude Code used an API key (ANTHROPIC_API_KEY), so /usage showed only the cost, not the plan limits. Set API key to Empty below."
         }
     }
 }
@@ -218,6 +220,9 @@ public enum LimitsReader {
     public static let command = "claude \(arguments)"
     /// Where the path a person chose for Claude Code is saved.
     public static let pathDefaultsKey = "claudePath"
+    /// The key goes to the shell in this variable, not in the command, so
+    /// it is not in the arguments that `ps` shows.
+    static let keyVariable = "CCOP_ANTHROPIC_API_KEY"
     /// What a shell returns when it cannot find a command.
     private static let commandNotFound: Int32 = 127
     /// Where Claude Code's installers put it, for a shell that does not find it.
@@ -235,8 +240,20 @@ public enum LimitsReader {
     /// `.zshrc`, and that is where many people set their PATH or an alias, so
     /// an interactive shell comes next; it is second because it starts slower.
     /// A chosen path also needs both: a `claude` script may need `node` from them.
-    static func attempts(claudePath: String?, environment: [String: String]) -> [[String]] {
-        func both(_ command: String) -> [[String]] { [["-l", "-c", command], ["-l", "-i", "-c", command]] }
+    /// The command as a person would type it, for the settings window.
+    public static func shownCommand(_ apiKey: ApiKeySetting) -> String {
+        switch apiKey {
+        case .shell: "claude -p /usage"
+        case .empty: "ANTHROPIC_API_KEY=\"\" claude -p /usage"
+        case .key: "ANTHROPIC_API_KEY=… claude -p /usage"
+        }
+    }
+
+    /// The variable is set after the shell has read its own files, so a
+    /// key exported in `.zshrc` does not win.
+    static func attempts(claudePath: String?, apiKey: ApiKeySetting = .shell, environment: [String: String]) -> [[String]] {
+        let prefix = apiKey.value == nil ? "" : "export ANTHROPIC_API_KEY=\"$\(keyVariable)\"; unset \(keyVariable); "
+        func both(_ command: String) -> [[String]] { [["-l", "-c", prefix + command], ["-l", "-i", "-c", prefix + command]] }
         func run(_ path: String) -> String { "'\(path.replacingOccurrences(of: "'", with: "'\\''"))' \(arguments)" }
         if let claudePath { return both(run(claudePath)) }
         let installed = installPlaces.compactMap { chosenPath($0, environment: environment) }
@@ -245,20 +262,25 @@ public enum LimitsReader {
     }
 
     public static func read(now: @autoclosure () -> Date = Date(), timeout: TimeInterval = 90, claudePath: String? = nil,
+                            apiKey: ApiKeySetting = .shell,
                             environment: [String: String] = ProcessInfo.processInfo.environment) throws -> UsageLimits {
-        let text = try run(timeout: timeout, claudePath: claudePath, environment: environment)
+        var environment = environment
+        environment[keyVariable] = apiKey.value
+        let text = try run(timeout: timeout, claudePath: claudePath, apiKey: apiKey, environment: environment)
         guard let limits = UsageLimits.parse(text, now: now()) else {
+            // With an API key, /usage prints "Total cost: …" and no limits.
+            if text.contains("Total cost:") { throw LimitsReaderError.apiKeyUsed }
             throw LimitsReaderError.unreadable(text.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return limits
     }
 
-    static func run(timeout: TimeInterval, claudePath: String?, environment: [String: String]) throws -> String {
+    static func run(timeout: TimeInterval, claudePath: String?, apiKey: ApiKeySetting, environment: [String: String]) throws -> String {
         if let claudePath, !FileManager.default.isExecutableFile(atPath: claudePath) {
             throw LimitsReaderError.chosenPathMissing(claudePath)
         }
         var lastMessage = ""
-        for arguments in attempts(claudePath: claudePath, environment: environment) {
+        for arguments in attempts(claudePath: claudePath, apiKey: apiKey, environment: environment) {
             let result = try execute(arguments, timeout: timeout, environment: environment)
             if result.status == 0 { return result.text }
             lastMessage = result.message

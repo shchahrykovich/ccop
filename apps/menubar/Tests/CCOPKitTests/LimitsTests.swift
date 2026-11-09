@@ -109,12 +109,13 @@ final class LimitsTests: XCTestCase {
 
     /// A home folder with a made-up `claude` that prints one limit, and the
     /// environment of an app opened from Finder: a short PATH.
-    private func fakeHome(claudeAt path: String, zshrc: String? = nil) throws -> (home: URL, environment: [String: String]) {
+    private func fakeHome(claudeAt path: String, zshrc: String? = nil,
+                          script: String = "#!/bin/sh\necho 'Current week (all models): 12% used'\n") throws -> (home: URL, environment: [String: String]) {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: home) }
         let claude = home.appendingPathComponent(path)
         try FileManager.default.createDirectory(at: claude.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "#!/bin/sh\necho 'Current week (all models): 12% used'\n".write(to: claude, atomically: true, encoding: .utf8)
+        try script.write(to: claude, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claude.path)
         if let zshrc { try zshrc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8) }
         return (home, ["HOME": home.path, "ZDOTDIR": home.path, "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"])
@@ -164,6 +165,86 @@ final class LimitsTests: XCTestCase {
         XCTAssertThrowsError(try LimitsReader.read(claudePath: gone, environment: env)) { error in
             XCTAssertEqual(error as? LimitsReaderError, .chosenPathMissing(gone))
         }
+    }
+
+    /// Like Claude Code: with an API key, /usage prints only the cost.
+    private let keyAwareClaude = """
+        #!/bin/sh
+        if [ -n "$ANTHROPIC_API_KEY" ]; then
+          printf 'Total cost:            $0.0000\\nkey=%s\\n' "$ANTHROPIC_API_KEY"
+          exit 0
+        fi
+        echo 'Current week (all models): 12% used'
+
+        """
+
+    func testAKeyFromTheShellFileGivesAPlainError() throws {
+        let (_, env) = try fakeHome(claudeAt: "tools/claude", zshrc: "export ANTHROPIC_API_KEY=sk-shell\nexport PATH=\"$HOME/tools:$PATH\"\n",
+                                    script: keyAwareClaude)
+        XCTAssertThrowsError(try LimitsReader.read(environment: env)) { error in
+            XCTAssertEqual(error as? LimitsReaderError, .apiKeyUsed)
+        }
+    }
+
+    func testAnEmptyKeyWinsOverTheKeyInTheShellFile() throws {
+        let (_, env) = try fakeHome(claudeAt: "tools/claude", zshrc: "export ANTHROPIC_API_KEY=sk-shell\nexport PATH=\"$HOME/tools:$PATH\"\n",
+                                    script: keyAwareClaude)
+        let limits = try LimitsReader.read(apiKey: .empty, environment: env)
+        XCTAssertEqual(limits.week?.usedPercent, 12)
+    }
+
+    func testAChosenKeyReachesClaudeButNotItsArguments() throws {
+        let (home, env) = try fakeHome(claudeAt: "tools/claude", zshrc: "export ANTHROPIC_API_KEY=sk-shell\n", script: keyAwareClaude)
+        let claude = home.appendingPathComponent("tools/claude").path
+        // The fake prints the key it got, and "Total cost:", so the read fails;
+        // the run's output is not in the error, so check the shell's lines.
+        XCTAssertThrowsError(try LimitsReader.read(claudePath: claude, apiKey: .key("sk-chosen 'x'"), environment: env))
+        for arguments in LimitsReader.attempts(claudePath: claude, apiKey: .key("sk-chosen 'x'"), environment: env) {
+            XCTAssertFalse(arguments.joined(separator: " ").contains("sk-chosen"))
+        }
+        var e = env
+        e["CCOP_ANTHROPIC_API_KEY"] = "sk-chosen 'x'"
+        let script = LimitsReader.attempts(claudePath: claude, apiKey: .key("sk-chosen 'x'"), environment: env)[1]
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = script
+        p.environment = e
+        let out = Pipe()
+        p.standardOutput = out
+        try p.run()
+        p.waitUntilExit()
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("key=sk-chosen 'x'"), text)
+    }
+
+    func testTheShellSettingChangesNothing() {
+        let env = ["HOME": "/Users/demo"]
+        XCTAssertEqual(LimitsReader.attempts(claudePath: "/opt/claude", apiKey: .shell, environment: env),
+                       LimitsReader.attempts(claudePath: "/opt/claude", environment: env))
+        XCTAssertFalse(LimitsReader.attempts(claudePath: "/opt/claude", environment: env)[0][2].contains("ANTHROPIC_API_KEY"))
+        XCTAssertEqual(LimitsReader.shownCommand(.empty), "ANTHROPIC_API_KEY=\"\" claude -p /usage")
+    }
+
+    func testTheKeyIsKeptInTheKeychainAndTheModeInDefaults() throws {
+        let suite = "ccop-test-" + UUID().uuidString
+        let store = ApiKeyStore(service: "ccop-test-" + UUID().uuidString, defaultsSuite: suite)
+        addTeardownBlock {
+            try? store.save(.shell)
+            UserDefaults().removePersistentDomain(forName: suite)
+        }
+        XCTAssertEqual(store.load(), .shell)
+        try store.save(.key("sk-one"))
+        XCTAssertEqual(store.load(), .key("sk-one"))
+        XCTAssertEqual(try store.readKey(), "sk-one")
+        XCTAssertFalse(UserDefaults(suiteName: suite)?.dictionaryRepresentation().values
+            .contains { "\($0)".contains("sk-one") } ?? true)
+        try store.save(.key("sk-two"))
+        XCTAssertEqual(store.load(), .key("sk-two"))
+        try store.save(.empty)
+        XCTAssertEqual(store.load(), .empty)
+        XCTAssertNil(try store.readKey())
+        try store.save(.shell)
+        XCTAssertEqual(store.load(), .shell)
     }
 
     func testATypedPathIsCleanedUp() {
